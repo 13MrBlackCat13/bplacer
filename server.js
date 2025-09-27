@@ -6,8 +6,130 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cors from "cors";
 import { CookieJar } from "tough-cookie";
-import { Impit } from "impit";
+import { gunzip, inflate, brotliDecompress } from "node:zlib";
+import { promisify } from "node:util";
+// import { Impit } from "impit";  // Временно отключено
 import { Image, createCanvas, loadImage } from "canvas";
+
+// Временная замена для Impit с использованием fetch
+class MockImpit {
+  constructor(options) {
+    console.log(`🔥 [DEBUG] MockImpit constructor called with:`, JSON.stringify(options, null, 2));
+    this.options = options;
+    this.cookieJar = options.cookieJar;
+  }
+
+  async fetch(url, options = {}) {
+    console.log(`🔥 [DEBUG] MockImpit.fetch called:`, url);
+
+    // Добавляем куки из cookieJar если есть
+    if (this.cookieJar) {
+      try {
+        const cookies = this.cookieJar.getCookiesSync(url);
+        if (cookies && cookies.length > 0) {
+          const cookieHeader = cookies.map(c => `${c.key}=${c.value}`).join('; ');
+          options.headers = options.headers || {};
+          options.headers['Cookie'] = cookieHeader;
+          console.log(`🔥 [DEBUG] Added cookies from jar:`, cookieHeader);
+        }
+      } catch (e) {
+        console.log(`🔥 [DEBUG] Error getting cookies:`, e.message);
+      }
+    }
+
+    console.log(`🔥 [DEBUG] Final headers:`, JSON.stringify(options.headers, null, 2));
+
+    return await fetch(url, options);
+  }
+}
+
+const Impit = MockImpit;
+
+// Helper function to decompress response based on encoding
+const decompressResponse = async (response) => {
+  const contentEncoding = response.headers.get('content-encoding');
+  const gunzipAsync = promisify(gunzip);
+  const inflateAsync = promisify(inflate);
+  const brotliDecompressAsync = promisify(brotliDecompress);
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  console.log(`🔥 [DEBUG] Buffer length: ${buffer.length}`);
+  console.log(`🔥 [DEBUG] Buffer first 10 bytes: [${Array.from(buffer.slice(0, 10)).map(b => b.toString(16).padStart(2, '0')).join(', ')}]`);
+  console.log(`🔥 [DEBUG] Content-Encoding header: ${contentEncoding}`);
+
+  // Check if buffer looks like compressed data (starts with compression magic bytes)
+  const isGzip = buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b;
+  const isDeflate = buffer.length >= 2 && buffer[0] === 0x78 && (buffer[1] === 0x01 || buffer[1] === 0x9c || buffer[1] === 0xda);
+  const isBrotli = buffer.length >= 6 && buffer.slice(0, 6).toString('hex') === '1b0000'; // Basic brotli check
+
+  console.log(`🔥 [DEBUG] Detected compression - gzip: ${isGzip}, deflate: ${isDeflate}, brotli: ${isBrotli}`);
+
+  // Check if buffer contains non-printable bytes (likely compressed)
+  const hasNonPrintable = buffer.some(byte => byte < 32 && byte !== 9 && byte !== 10 && byte !== 13);
+  console.log(`🔥 [DEBUG] Buffer has non-printable characters: ${hasNonPrintable}`);
+
+  try {
+    // Try gzip first if detected or if content-encoding says so
+    if (isGzip || contentEncoding === 'gzip') {
+      console.log(`🔥 [DEBUG] Attempting gzip decompression`);
+      return (await gunzipAsync(buffer)).toString('utf8');
+    }
+
+    // Try deflate
+    if (isDeflate || contentEncoding === 'deflate') {
+      console.log(`🔥 [DEBUG] Attempting deflate decompression`);
+      return (await inflateAsync(buffer)).toString('utf8');
+    }
+
+    // Try brotli
+    if (isBrotli || contentEncoding === 'br') {
+      console.log(`🔥 [DEBUG] Attempting brotli decompression`);
+      return (await brotliDecompressAsync(buffer)).toString('utf8');
+    }
+
+    // If buffer looks binary/compressed but no magic bytes matched, try all methods
+    if (hasNonPrintable) {
+      console.log(`🔥 [DEBUG] Buffer contains non-printable characters, trying all decompression methods`);
+
+      // Try gzip
+      try {
+        const result = (await gunzipAsync(buffer)).toString('utf8');
+        console.log(`🔥 [DEBUG] Gzip decompression successful`);
+        return result;
+      } catch (e) {
+        console.log(`🔥 [DEBUG] Gzip failed:`, e.message);
+      }
+
+      // Try deflate
+      try {
+        const result = (await inflateAsync(buffer)).toString('utf8');
+        console.log(`🔥 [DEBUG] Deflate decompression successful`);
+        return result;
+      } catch (e) {
+        console.log(`🔥 [DEBUG] Deflate failed:`, e.message);
+      }
+
+      // Try brotli
+      try {
+        const result = (await brotliDecompressAsync(buffer)).toString('utf8');
+        console.log(`🔥 [DEBUG] Brotli decompression successful`);
+        return result;
+      } catch (e) {
+        console.log(`🔥 [DEBUG] Brotli failed:`, e.message);
+      }
+    }
+
+    // Fallback to plain text
+    console.log(`🔥 [DEBUG] No compression detected or all methods failed, returning as plain text`);
+    return buffer.toString('utf8');
+
+  } catch (error) {
+    console.log(`🔥 [DEBUG] Decompression error:`, error.message);
+    // Fallback: return as plain text if decompression fails
+    return buffer.toString('utf8');
+  }
+};
 
 // --- Setup __dirname for ES modules ---
 const __filename = fileURLToPath(import.meta.url);
@@ -411,12 +533,13 @@ class WPlacer {
   }
 
   async login(cookies) {
+    console.log(`🔥 [DEBUG] Login method called with cookies:`, JSON.stringify(cookies, null, 2));
     this.cookies = cookies;
     const jar = new CookieJar();
     for (const cookie of Object.keys(this.cookies)) {
       const value = `${cookie}=${this.cookies[cookie]}; Path=/`;
-      jar.setCookieSync(value, "https://backend.wplace.live");
-      jar.setCookieSync(value, "https://wplace.live");
+      jar.setCookieSync(value, "https://bplace.org");
+      jar.setCookieSync(value, "https://bplace.org");
     }
     const impitOptions = { cookieJar: jar, browser: "chrome", ignoreTlsErrors: true };
     const proxySel = getNextProxy();
@@ -429,31 +552,79 @@ class WPlacer {
     } else if (currentSettings.proxyEnabled && loadedProxies.length === 0) {
       log("SYSTEM", "wplacer", `⚠️ Proxy enabled but no valid proxies loaded - check proxies.txt format`);
     }
-    this.browser = new Impit(impitOptions);
+    // Временно не используем Impit - работаем напрямую с fetch
+    // this.browser = new Impit(impitOptions);
+
+    // Создаём заглушку для browser.fetch
+    this.browser = {
+      fetch: async (url, options) => {
+        const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
+        options.headers = options.headers || {};
+        options.headers["Cookie"] = cookieHeader;
+        return await fetch(url, options);
+      }
+    };
+
     await this.loadUserInfo();
     return this.userInfo;
   }
 
   async loadUserInfo() {
-    const url = "https://backend.wplace.live/me";
-    const me = await this.browser.fetch(url, {
+    const url = "https://bplace.org/me";
+    console.log(`🔥 [DEBUG] LoadUserInfo making request to: ${url}`);
+
+    // Временно используем обычный fetch вместо Impit для тестирования
+    const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
+    console.log(`🔥 [DEBUG] Cookie header:`, cookieHeader);
+
+    const me = await fetch(url, {
       headers: {
         "Accept": "application/json, text/plain, */*",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": "https://wplace.live/",
-        "Origin": "https://wplace.live",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+        "Accept-Encoding": "identity", // Force no compression
+        "Accept-Language": "ru-UA,ru;q=0.9,en-US;q=0.8,en;q=0.7,ru-RU;q=0.6",
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json",
+        "Origin": "https://bplace.org",
+        "Pragma": "no-cache",
+        "Referer": "https://bplace.org/",
+        "Sec-Ch-Ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+        "Sec-Ch-Ua-Arch": '"x86"',
+        "Sec-Ch-Ua-Bitness": '"64"',
+        "Sec-Ch-Ua-Full-Version": '"140.0.7339.208"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Model": '""',
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Ch-Ua-Platform-Version": '"19.0.0"',
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site"
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cookie": cookieHeader
       },
       redirect: "manual"
     });
     const status = me.status;
     const contentType = (me.headers.get("content-type") || "").toLowerCase();
-    const bodyText = await me.text();
+    const contentEncoding = me.headers.get("content-encoding");
+
+    console.log(`🔥 [DEBUG] Response headers - Content-Type: ${contentType}, Content-Encoding: ${contentEncoding}`);
+
+    // Always try decompression first since servers may compress without proper headers
+    console.log(`🔥 [DEBUG] Attempting decompression of response`);
+    let bodyText;
+    try {
+      bodyText = await decompressResponse(me);
+    } catch (error) {
+      console.log(`🔥 [DEBUG] Decompression failed, using direct text:`, error.message);
+      bodyText = await me.text();
+    }
+
     const short = bodyText.substring(0, 200);
+
+    console.log(`🔥 [DEBUG] LoadUserInfo response status: ${status}`);
+    console.log(`🔥 [DEBUG] LoadUserInfo response content-type: ${contentType}`);
+    console.log(`🔥 [DEBUG] LoadUserInfo response body:`, short);
     if (status === 429) {
       throw new Error("❌ Rate limited (429) - waiting before retry");
     }
@@ -518,18 +689,38 @@ class WPlacer {
 
   async post(url, body) {
     const headers = {
-      Accept: "application/json, text/plain, */*",
+      "Accept": "*/*",
+      "Accept-Encoding": "identity",
+      "Accept-Language": "ru-UA,ru;q=0.9,en-US;q=0.8,en;q=0.7,ru-RU;q=0.6",
       "Content-Type": "text/plain;charset=UTF-8",
-      Referer: "https://wplace.live/",
-      Origin: "https://wplace.live",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+      "Origin": "https://bplace.org",
+      "Priority": "u=1, i",
+      "Referer": "https://bplace.org/",
+      "Sec-Ch-Ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+      "Sec-Ch-Ua-Arch": '"x86"',
+      "Sec-Ch-Ua-Bitness": '"64"',
+      "Sec-Ch-Ua-Full-Version": '"140.0.7339.208"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Model": '""',
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Ch-Ua-Platform-Version": '"19.0.0"',
       "Sec-Fetch-Dest": "empty",
       "Sec-Fetch-Mode": "cors",
-      "Sec-Fetch-Site": "same-site"
+      "Sec-Fetch-Site": "same-origin",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
     };
     if (this.pawtect) headers["x-pawtect-token"] = this.pawtect;
-    const request = await this.browser.fetch(url, {
+
+    // Детальное логирование запроса
+    console.log(`🔥 [DEBUG] POST Request to: ${url}`);
+    console.log(`🔥 [DEBUG] Request body:`, JSON.stringify(body, null, 2));
+    console.log(`🔥 [DEBUG] Request headers:`, JSON.stringify(headers, null, 2));
+
+    // Добавляем куки в заголовки
+    const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
+    headers["Cookie"] = cookieHeader;
+
+    const request = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -537,7 +728,24 @@ class WPlacer {
     });
     const status = request.status;
     const contentType = (request.headers.get("content-type") || "").toLowerCase();
-    const text = await request.text();
+    const contentEncoding = request.headers.get("content-encoding");
+
+    console.log(`🔥 [DEBUG] POST Response headers - Content-Type: ${contentType}, Content-Encoding: ${contentEncoding}`);
+
+    // Always try decompression first since servers may compress without proper headers
+    console.log(`🔥 [DEBUG] Attempting decompression of POST response`);
+    let text;
+    try {
+      text = await decompressResponse(request);
+    } catch (error) {
+      console.log(`🔥 [DEBUG] POST decompression failed, using direct text:`, error.message);
+      text = await request.text();
+    }
+
+    // Логирование ответа
+    console.log(`🔥 [DEBUG] Response status: ${status}`);
+    console.log(`🔥 [DEBUG] Response content-type: ${contentType}`);
+    console.log(`🔥 [DEBUG] Response text:`, text.substring(0, 500));
     if (!contentType.includes("application/json")) {
       const short = text.substring(0, 200);
       if (/error\s*1015/i.test(text) || /rate.?limit/i.test(text) || status === 429) {
@@ -570,7 +778,7 @@ class WPlacer {
 
     const loadOneTile = async (targetTx, targetTy, allowActivate = true) => {
       try {
-        const url = `https://backend.wplace.live/files/s0/tiles/${targetTx}/${targetTy}.png?t=${Date.now()}`;
+        const url = `https://bplace.org/files/s0/tiles/${targetTx}/${targetTy}.png?t=${Date.now()}`;
         const resp = await fetch(url, { headers: { Accept: "image/*" } });
         if (resp.status === 404) {
           // Tile might be not initialized yet
@@ -661,7 +869,7 @@ class WPlacer {
 
   async _executePaint(tx, ty, body) {
     if (body.colors.length === 0) return { painted: 0, success: true };
-    const response = await this.post(`https://backend.wplace.live/s0/pixel/${tx}/${ty}`, body);
+    const response = await this.post(`https://bplace.org/s0/pixel/${tx}/${ty}`, body);
 
     if (response.data.painted && response.data.painted === body.colors.length) {
       log(this.userInfo.id, this.userInfo.name, `[${this.templateName}] 🎨 Painted ${body.colors.length} pixels on tile ${tx}, ${ty}.`);
@@ -1324,7 +1532,7 @@ class WPlacer {
     const body = { product: { id: productId, amount } };
     if (typeof variant === "number") body.product.variant = variant;
 
-    const response = await this.post(`https://backend.wplace.live/purchase`, body);
+    const response = await this.post(`https://bplace.org/purchase`, body);
 
     if (response.status === 200 && response.data && response.data.success === true) {
       let msg = `🛒 Purchase successful for product #${productId} (amount: ${amount})`;
@@ -1351,7 +1559,7 @@ class WPlacer {
 
   async equipFlag(flagId) {
     const id = Number(flagId) || 0;
-    const url = `https://backend.wplace.live/flag/equip/${id}`;
+    const url = `https://bplace.org/flag/equip/${id}`;
     const res = await this.post(url, {});
     if (res.status === 200 && res.data && res.data.success === true) {
       if (id === 0) {
@@ -2493,6 +2701,184 @@ app.post("/t", (req, res) => {
   res.sendStatus(200);
 });
 
+// Global storage for manual cookies
+let manualCookies = {
+  j: null,
+  cf_clearance: null,
+  s: null  // Alternative name for cf_clearance that some users might use
+};
+
+// Manual cookie input web interface
+app.get("/manual-cookies", (req, res) => {
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>bplacer - Manual Cookie Input</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: #fff; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .form-group { margin: 20px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, textarea { width: 100%; padding: 10px; margin-bottom: 10px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .current-cookies { background: #333; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        .cookie-value { font-family: monospace; background: #222; padding: 5px; border-radius: 3px; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 bplacer - Manual Cookie Input</h1>
+        <p>Введите куки с сайта bplace.org вручную для обхода проблем с расширением:</p>
+
+        <div class="current-cookies">
+            <h3>Текущие куки:</h3>
+            <p><strong>j:</strong> <span class="cookie-value">${manualCookies.j || 'не установлен'}</span></p>
+            <p><strong>cf_clearance:</strong> <span class="cookie-value">${manualCookies.cf_clearance || 'не установлен'}</span></p>
+        </div>
+
+        <form id="cookieForm">
+            <div class="form-group">
+                <label for="j">JWT Token (j):</label>
+                <textarea id="j" name="j" rows="3" placeholder="eyJhbGciOiJIUzI1NiJ9...">${manualCookies.j || ''}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="cf_clearance">Cloudflare Clearance (cf_clearance):</label>
+                <textarea id="cf_clearance" name="cf_clearance" rows="3" placeholder="XRD6.M_2rqolWSf778p...">${manualCookies.cf_clearance || ''}</textarea>
+            </div>
+
+            <button type="submit">Сохранить куки</button>
+        </form>
+
+        <div id="status"></div>
+
+        <h3>Как получить куки:</h3>
+        <ol>
+            <li>Откройте bplace.org в Chrome</li>
+            <li>Нажмите F12 (DevTools)</li>
+            <li>Перейдите на вкладку Application</li>
+            <li>В левом меню выберите Storage → Cookies → https://bplace.org</li>
+            <li>Скопируйте значения куков j и cf_clearance</li>
+        </ol>
+    </div>
+
+    <script>
+        document.getElementById('cookieForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(e.target);
+            const data = {
+                j: formData.get('j').trim(),
+                cf_clearance: formData.get('cf_clearance').trim()
+            };
+
+            try {
+                const response = await fetch('/manual-cookies', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.text();
+                const statusDiv = document.getElementById('status');
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ Куки успешно сохранены!</div>';
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${result}</div>\`;
+                }
+            } catch (error) {
+                document.getElementById('status').innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            }
+        });
+    </script>
+</body>
+</html>`;
+  res.send(html);
+});
+
+// Save manual cookies
+app.post("/manual-cookies", (req, res) => {
+  const { j, cf_clearance } = req.body || {};
+
+  if (!j || !cf_clearance) {
+    return res.status(400).send("Оба куки (j и cf_clearance) обязательны");
+  }
+
+  // Validate JWT format
+  if (!j.startsWith('eyJ')) {
+    return res.status(400).send("Неверный формат JWT token (j)");
+  }
+
+  // Save cookies
+  manualCookies.j = j;
+  manualCookies.cf_clearance = cf_clearance;
+
+  console.log(`🍪 [MANUAL] Cookies saved manually:`);
+  console.log(`🍪 [MANUAL] j: ${j.substring(0, 50)}...`);
+  console.log(`🍪 [MANUAL] cf_clearance: ${cf_clearance.substring(0, 50)}...`);
+
+  res.send("Куки сохранены успешно");
+});
+
+// Test endpoint to directly test bplace.org requests
+app.get("/test-bplace", async (req, res) => {
+  console.log(`🔥 [TEST] Testing direct request to bplace.org`);
+
+  const cookies = {
+    j: "eyJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uSWQiOiI2YTc5NDNmNy0xNjRkLTQxMzktYTg2NS1mYTFjMzcxM2I2NjQiLCJ1c2VySWQiOjI3OTMsImlzcyI6Im9wZW5wbGFjZSIsImlhdCI6MTc1ODk3MjAyMywiZXhwIjoxNzYxNTY0MDIzfQ.SdD63GHIyC3I3eXxxqAyeU4RQKbx9m_g2nDbsv2QqNc",
+    cf_clearance: "XRD6.M_2rqolWSf778p.gEEL_ccKx.kSKb_EumvXwIU-1758973863-1.2.1.1-8HwjsaCKiEGrbMOvG8ukDrnhxdZgat098t_djL0JUBoLFhEVsTS_uP5NpBwTwjAJTob_8Tgwew4b5SkropTcIvTi8lCdZO8_rpCVXXqclF3jXiSs_aTBAvjJqJ..ArmdLx1f0I3qfoH6hrYZQlM5DnRYnQaIRYPYvDYZ8bOeg3Ooa8EGdZkVFps2t22D8KDlG_kQ6fZtH_d8mSQIMCPp6EEDmKmmkKzM86pwnSeGVxs"
+  };
+
+  try {
+    const cookieHeader = Object.keys(cookies).map(key => `${key}=${cookies[key]}`).join('; ');
+    console.log(`🔥 [TEST] Cookie header: ${cookieHeader.substring(0, 100)}...`);
+
+    const response = await fetch("https://bplace.org/me", {
+      headers: {
+        "Accept": "application/json",
+        "Accept-Encoding": "identity",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": cookieHeader
+      }
+    });
+
+    console.log(`🔥 [TEST] Response status: ${response.status}`);
+    console.log(`🔥 [TEST] Response headers:`, Object.fromEntries(response.headers.entries()));
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    console.log(`🔥 [TEST] Buffer length: ${buffer.length}`);
+    console.log(`🔥 [TEST] First 10 bytes: [${Array.from(buffer.slice(0, 10)).join(', ')}]`);
+
+    // Try decompression
+    let text;
+    try {
+      text = await decompressResponse(response);
+      console.log(`🔥 [TEST] Decompressed successfully`);
+    } catch (error) {
+      console.log(`🔥 [TEST] Decompression failed: ${error.message}`);
+      text = buffer.toString('utf8');
+    }
+
+    res.json({
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      textLength: text.length,
+      textPreview: text.substring(0, 200)
+    });
+
+  } catch (error) {
+    console.error(`🔥 [TEST] Error:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- API: users ---
 const getJwtExp = (j) => {
   try {
@@ -2632,18 +3018,48 @@ app.get("/users", (_, res) => {
 
 
 app.post("/user", async (req, res) => {
-  if (!req.body.cookies || !req.body.cookies.j) return res.sendStatus(400);
+  console.log(`🔥 [DEBUG] POST /user received`);
+  console.log(`🔥 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
+
+  // Use manual cookies if no cookies provided in request
+  let cookiesToUse = req.body.cookies;
+
+  if (!cookiesToUse || !cookiesToUse.j) {
+    const clearanceCookie = manualCookies.cf_clearance || manualCookies.s;
+    if (manualCookies.j && clearanceCookie) {
+      console.log(`🍪 [MANUAL] No cookies in request, using manual cookies`);
+      cookiesToUse = {
+        j: manualCookies.j,
+        cf_clearance: clearanceCookie,
+        s: clearanceCookie  // Include both names for compatibility
+      };
+    } else {
+      console.log(`❌ [ERROR] No cookies provided and no manual cookies available`);
+      return res.status(400).json({
+        error: "No cookies provided. Please use the extension or manual cookie input at /manual-cookies"
+      });
+    }
+  } else {
+    // If cookies provided, ensure both cf_clearance and s are available for compatibility
+    if (cookiesToUse.s && !cookiesToUse.cf_clearance) {
+      cookiesToUse.cf_clearance = cookiesToUse.s;
+    } else if (cookiesToUse.cf_clearance && !cookiesToUse.s) {
+      cookiesToUse.s = cookiesToUse.cf_clearance;
+    }
+  }
+
   const wplacer = new WPlacer();
   try {
-    const userInfo = await wplacer.login(req.body.cookies);
-    const exp = getJwtExp(req.body.cookies.j);
+    console.log(`🔥 [DEBUG] Attempting login with cookies`);
+    const userInfo = await wplacer.login(cookiesToUse);
+    const exp = getJwtExp(cookiesToUse.j);
     const profileNameRaw = typeof req.body?.profileName === "string" ? String(req.body.profileName) : "";
     const shortLabelFromProfile = profileNameRaw.trim().slice(0, 40);
     const prev = users[userInfo.id] || {};
     users[userInfo.id] = {
       ...prev,
       name: userInfo.name,
-      cookies: req.body.cookies,
+      cookies: cookiesToUse,
       expirationDate: exp || prev?.expirationDate || null
     };
     if (shortLabelFromProfile) {
@@ -2652,6 +3068,8 @@ app.post("/user", async (req, res) => {
     saveUsers();
     res.json(userInfo);
   } catch (error) {
+    console.log(`🔥 [DEBUG] Error in /user endpoint:`, error.message);
+    console.log(`🔥 [DEBUG] Error stack:`, error.stack);
     logUserError(error, "NEW_USER", "N/A", "add new user");
     res.status(500).json({ error: error.message });
   }
@@ -2804,7 +3222,7 @@ app.put("/user/:id/update-profile", async (req, res) => {
     await wplacer.login(users[id].cookies);
     const payload = { name, discord, showLastPixel };
 
-    const { status, data } = await wplacer.post("https://backend.wplace.live/me/update", payload);
+    const { status, data } = await wplacer.post("https://bplace.org/me/update", payload);
     if (status === 200 && data && data.success) {
       if (typeof name === "string" && name.length) { users[id].name = name; }
       users[id].discord = discord;
@@ -2889,12 +3307,12 @@ app.post("/user/:id/alliance/join", async (req, res) => {
   const wplacer = new WPlacer();
   try {
     await wplacer.login(users[id].cookies);
-    const url = `https://backend.wplace.live/alliance/join/${encodeURIComponent(uuid.trim())}`;
+    const url = `https://bplace.org/alliance/join/${encodeURIComponent(uuid.trim())}`;
     const response = await wplacer.browser.fetch(url, {
       method: "GET",
       headers: {
         Accept: "text/html,application/json,*/\*",
-        Referer: "https://wplace.live/"
+        Referer: "https://bplace.org/"
       },
       redirect: "manual"
     });
@@ -2929,12 +3347,12 @@ app.post("/user/:id/alliance/leave", async (req, res) => {
   const wplacer = new WPlacer();
   try {
     await wplacer.login(users[id].cookies);
-    const url = `https://backend.wplace.live/alliance/leave`;
+    const url = `https://bplace.org/alliance/leave`;
     const response = await wplacer.browser.fetch(url, {
       method: "POST",
       headers: {
         Accept: "*/*",
-        Referer: "https://wplace.live/"
+        Referer: "https://bplace.org/"
       }
     });
     const status = response.status | 0;
@@ -4022,8 +4440,8 @@ app.get("/test-proxies", async (req, res) => {
     const target = String(req.query.target || "tile").toLowerCase();
     const isMe = target === "me";
     const targetUrl = isMe
-      ? "https://backend.wplace.live/me"
-      : String(req.query.url || "https://backend.wplace.live/files/s0/tiles/0/0.png");
+      ? "https://bplace.org/me"
+      : String(req.query.url || "https://bplace.org/files/s0/tiles/0/0.png");
 
     const toTest = loadedProxies.map((p, i) => ({
       idx: Number(p._idx) || (i + 1),
@@ -4064,15 +4482,15 @@ app.get("/test-proxies", async (req, res) => {
                 ? {
                   Accept: "application/json, text/plain, */*",
                   "X-Requested-With": "XMLHttpRequest",
-                  Referer: "https://wplace.live/",
-                  Origin: "https://wplace.live",
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                  Referer: "https://bplace.org/",
+                  Origin: "https://bplace.org",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
                   "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
                   "Sec-Fetch-Dest": "empty",
                   "Sec-Fetch-Mode": "cors",
-                  "Sec-Fetch-Site": "same-site"
+                  "Sec-Fetch-Site": "same-origin"
                 }
-                : { Accept: "image/*", Referer: "https://wplace.live/" },
+                : { Accept: "image/*", Referer: "https://bplace.org/" },
               redirect: "manual",
               signal: controller.signal
             });
@@ -4159,7 +4577,7 @@ app.get("/test-proxy", async (req, res) => {
     const idx = Math.max(1, parseInt(String(req.query.idx || "0"), 10) || 0);
     const target = String(req.query.target || "me").toLowerCase();
     const isMe = target === "me";
-    const targetUrl = isMe ? "https://backend.wplace.live/me" : "https://backend.wplace.live/files/s0/tiles/0/0.png";
+    const targetUrl = isMe ? "https://bplace.org/me" : "https://bplace.org/files/s0/tiles/0/0.png";
 
     const p = loadedProxies.find((x, i) => Number(x._idx) === idx) || loadedProxies[idx - 1];
     if (!p) return res.status(404).json({ error: "proxy_not_found" });
@@ -4186,15 +4604,15 @@ app.get("/test-proxy", async (req, res) => {
             ? {
               Accept: "application/json, text/plain, */*",
               "X-Requested-With": "XMLHttpRequest",
-              Referer: "https://wplace.live/",
-              Origin: "https://wplace.live",
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+              Referer: "https://bplace.org/",
+              Origin: "https://bplace.org",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
               "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
               "Sec-Fetch-Dest": "empty",
               "Sec-Fetch-Mode": "cors",
-              "Sec-Fetch-Site": "same-site"
+              "Sec-Fetch-Site": "same-origin"
             }
-            : { Accept: "image/*", Referer: "https://wplace.live/" },
+            : { Accept: "image/*", Referer: "https://bplace.org/" },
           redirect: "manual",
           signal: controller.signal
         });
@@ -4342,12 +4760,42 @@ app.get("/canvas", async (req, res) => {
   const { tx, ty } = req.query;
   if (isNaN(parseInt(tx)) || isNaN(parseInt(ty))) return res.sendStatus(400);
   try {
-    const url = `https://backend.wplace.live/files/s0/tiles/${tx}/${ty}.png`;
+    const url = `https://bplace.org/files/s0/tiles/${tx}/${ty}.png`;
     let buffer;
+
+    // Get authentication cookies from any logged-in user or manual cookies
+    let authCookies = null;
+    if (manualCookies.j && (manualCookies.cf_clearance || manualCookies.s)) {
+      authCookies = {
+        j: manualCookies.j,
+        cf_clearance: manualCookies.cf_clearance || manualCookies.s
+      };
+    } else {
+      // Try to find cookies from any logged-in user
+      const userIds = Object.keys(users);
+      for (const userId of userIds) {
+        const user = users[userId];
+        if (user && user.cookies && user.cookies.j) {
+          authCookies = user.cookies;
+          break;
+        }
+      }
+    }
+
+    const headers = { Accept: "image/*" };
+    if (authCookies) {
+      const cookieHeader = Object.keys(authCookies)
+        .map(key => `${key}=${authCookies[key]}`)
+        .join('; ');
+      headers['Cookie'] = cookieHeader;
+      console.log(`🔥 [DEBUG] Canvas request with auth cookies for ${url}`);
+    } else {
+      console.log(`🔥 [DEBUG] Canvas request without auth cookies for ${url}`);
+    }
 
     const useProxy = !!currentSettings.proxyEnabled && loadedProxies.length > 0;
     if (useProxy) {
-      // Fetch via Impit to respect proxy settings (no cookies needed)
+      // Fetch via Impit to respect proxy settings with authentication
       const impitOptions = { browser: "chrome", ignoreTlsErrors: true };
       const proxySel = getNextProxy();
       if (proxySel) {
@@ -4357,17 +4805,24 @@ app.get("/canvas", async (req, res) => {
         }
       }
       const imp = new Impit(impitOptions);
-      const resp = await imp.fetch(url, { headers: { Accept: "image/*" } });
-      if (!resp.ok) return res.sendStatus(resp.status);
+      const resp = await imp.fetch(url, { headers });
+      if (!resp.ok) {
+        console.log(`🔥 [DEBUG] Canvas proxy fetch failed: ${resp.status} ${resp.statusText}`);
+        return res.sendStatus(resp.status);
+      }
       buffer = Buffer.from(await resp.arrayBuffer());
     } else {
-      const response = await fetch(url);
-      if (!response.ok) return res.sendStatus(response.status);
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        console.log(`🔥 [DEBUG] Canvas fetch failed: ${response.status} ${response.statusText}`);
+        return res.sendStatus(response.status);
+      }
       buffer = Buffer.from(await response.arrayBuffer());
     }
 
     res.json({ image: `data:image/png;base64,${buffer.toString("base64")}` });
   } catch (error) {
+    console.log(`🔥 [DEBUG] Canvas error:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });

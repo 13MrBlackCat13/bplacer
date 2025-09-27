@@ -1,4 +1,4 @@
-// Content script for wplace.live to initiate login flow when requested
+// Content script for bplace.org to initiate login flow when requested
 console.log('[AUTO-LOGIN EXTENSION] wplace.js loaded');
 // Seed profileName from URL query if present (first time only)
 (function seedProfileFromQuery(){

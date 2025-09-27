@@ -7,8 +7,20 @@ const AUTO_RELOAD_ALARM_NAME = 'wplacer-auto-reload-alarm';
 
 const getSettings = async () => {
     const result = await chrome.storage.local.get(['wplacerPort', 'wplacerAutoReload']);
+
+    // Force port to 3001 if it's still set to 80 or 3000
+    let port = result.wplacerPort || 3001;
+    if (port === 80 || port === 3000) {
+        port = 3001;
+        // Update stored port
+        chrome.storage.local.set({ wplacerPort: 3001 });
+        console.log('wplacer: Updated port to 3001');
+    }
+
+    console.log(`wplacer: Using port ${port}`);
+
     return {
-        port: result.wplacerPort || 80,
+        port: port,
         host: '127.0.0.1',
         autoReloadInterval: result.wplacerAutoReload || 0
     };
@@ -16,7 +28,9 @@ const getSettings = async () => {
 
 const getServerUrl = async (path = '') => {
     const { host, port } = await getSettings();
-    return `http://${host}:${port}${path}`;
+    const url = `http://${host}:${port}${path}`;
+    console.log(`wplacer: Connecting to ${url}`);
+    return url;
 };
 
 let LP_ACTIVE = false;
@@ -52,7 +66,7 @@ const updateAutoReloadAlarm = async () => {
 
 const performAutoReload = async () => {
     try {
-        const tabs = await chrome.tabs.query({ url: "https://wplace.live/*" });
+        const tabs = await chrome.tabs.query({ url: "https://bplace.org/*" });
         if (tabs && tabs.length > 0) {
             console.log(`wplacer: Auto-reloading ${tabs.length} wplace.live tab(s)`);
             for (const tab of tabs) {
@@ -163,7 +177,7 @@ const injectPawtectIntoTab = async (tabId) => {
             func: () => {
                 if (window.__wplacerPawtectHooked) return;
                 window.__wplacerPawtectHooked = true;
-                const backend = 'https://backend.wplace.live';
+                const backend = 'https://bplace.org';
                 const findPawtectPath = async () => {
                     const cacheKey = 'wplacer_pawtect_path';
                     const cacheTimeKey = 'wplacer_pawtect_cache_time';
@@ -243,10 +257,10 @@ const injectPawtectIntoTab = async (tabId) => {
 
 const initiateReload = async () => {
     try {
-        let tabs = await chrome.tabs.query({ url: "https://wplace.live/*" });
+        let tabs = await chrome.tabs.query({ url: "https://bplace.org/*" });
         if (!tabs || tabs.length === 0) {
             console.warn("wplacer: No wplace.live tabs found. Opening a new one for token acquisition.");
-            const created = await chrome.tabs.create({ url: "https://wplace.live/" });
+            const created = await chrome.tabs.create({ url: "https://bplace.org/" });
             tabs = [created];
         }
         const targetTab = tabs.find(t => t.active) || tabs[0];
@@ -264,7 +278,7 @@ const initiateReload = async () => {
                 await chrome.tabs.reload(targetTab.id, { bypassCache: true });
             } catch {
                 try {
-                    const appended = (targetTab.url || 'https://wplace.live/').replace(/[#?]$/, '');
+                    const appended = (targetTab.url || 'https://bplace.org/').replace(/[#?]$/, '');
                     const url = appended + (appended.includes('?') ? '&' : '?') + 'wplacer=' + Date.now();
                     await chrome.tabs.update(targetTab.id, { url });
                 } catch {}
@@ -276,11 +290,11 @@ const initiateReload = async () => {
         }, 200);
     } catch (error) {
         console.error("wplacer: Error sending reload message to tab, falling back to direct reload.", error);
-        const tabs = await chrome.tabs.query({ url: "https://wplace.live/*" });
+        const tabs = await chrome.tabs.query({ url: "https://bplace.org/*" });
         if (tabs && tabs.length > 0) {
             chrome.tabs.reload((tabs.find(t => t.active) || tabs[0]).id);
         } else {
-            await chrome.tabs.create({ url: "https://wplace.live/" });
+            await chrome.tabs.create({ url: "https://bplace.org/" });
         }
     }
 };
@@ -288,18 +302,68 @@ const initiateReload = async () => {
 const sendCookie = async (callback) => {
     const getCookie = (details) => new Promise(resolve => chrome.cookies.get(details, cookie => resolve(cookie)));
 
-    const [jCookie, sCookie] = await Promise.all([
-        getCookie({ url: "https://backend.wplace.live", name: "j" }),
-        getCookie({ url: "https://backend.wplace.live", name: "s" })
+    console.log("wplacer: Looking for cookies on bplace.org...");
+
+    const [jCookie, cfClearanceCookie] = await Promise.all([
+        getCookie({ url: "https://bplace.org", name: "j" }),
+        getCookie({ url: "https://bplace.org", name: "cf_clearance" })
     ]);
 
+    console.log("wplacer: Found j cookie:", !!jCookie);
+    console.log("wplacer: Found cf_clearance cookie:", !!cfClearanceCookie);
+
+    if (jCookie) {
+        console.log("wplacer: j cookie details:", {
+            domain: jCookie.domain,
+            path: jCookie.path,
+            secure: jCookie.secure,
+            httpOnly: jCookie.httpOnly
+        });
+
+        // Try to find cf_clearance on the same domain as j cookie
+        const cfOnJDomain = await getCookie({ url: `https://${jCookie.domain.startsWith('.') ? jCookie.domain.substring(1) : jCookie.domain}`, name: "cf_clearance" });
+        console.log("wplacer: cf_clearance on j cookie domain:", !!cfOnJDomain);
+        if (cfOnJDomain) {
+            console.log("wplacer: cf_clearance details:", {
+                domain: cfOnJDomain.domain,
+                path: cfOnJDomain.path,
+                value: cfOnJDomain.value.substring(0, 20) + "..."
+            });
+        }
+    }
+
+    // ALWAYS get all cookies for debug (not just when jCookie is missing)
+    chrome.cookies.getAll({domain: "bplace.org"}, (cookies) => {
+        console.log("wplacer: All cookies for bplace.org:", cookies.length);
+        cookies.forEach(cookie => console.log(`- ${cookie.name}: ${cookie.domain}${cookie.path} (value: ${cookie.value.substring(0, 20)}...)`));
+    });
+
+    // Also try different domain variations
+    chrome.cookies.getAll({domain: ".bplace.org"}, (cookies) => {
+        console.log("wplacer: All cookies for .bplace.org:", cookies.length);
+        cookies.forEach(cookie => console.log(`- ${cookie.name}: ${cookie.domain}${cookie.path} (value: ${cookie.value.substring(0, 20)}...)`));
+    });
+
+    // Try getting ALL cookies and filter
+    chrome.cookies.getAll({}, (cookies) => {
+        const bplaceCookies = cookies.filter(c => c.domain.includes('bplace'));
+        console.log("wplacer: All bplace-related cookies found:", bplaceCookies.length);
+        bplaceCookies.forEach(cookie => console.log(`- ${cookie.name}: ${cookie.domain}${cookie.path} (value: ${cookie.value.substring(0, 20)}...)`));
+    });
+
     if (!jCookie) {
-        if (callback) callback({ success: false, error: "Cookie 'j' not found. Are you logged in?" });
+
+        chrome.cookies.getAll({domain: "backend.bplace.org"}, (cookies) => {
+            console.log("wplacer: All cookies for backend.bplace.org:", cookies.length);
+            cookies.forEach(cookie => console.log(`- ${cookie.name}: ${cookie.domain}${cookie.path}`));
+        });
+
+        if (callback) callback({ success: false, error: "Cookie 'j' not found. Are you logged in to bplace.org?" });
         return;
     }
 
     const cookies = { j: jCookie.value };
-    if (sCookie) cookies.s = sCookie.value;
+    if (cfClearanceCookie) cookies.cf_clearance = cfClearanceCookie.value;
     const url = await getServerUrl("/user");
 
     try {
@@ -317,10 +381,10 @@ const sendCookie = async (callback) => {
 };
 
 const quickLogout = (callback) => {
-    const origin = "https://backend.wplace.live/";
-    console.log(`wplacer: Clearing browsing data for ${origin}`);
+    const origins = ["https://bplace.org/", "https://bplace.org/"];
+    console.log(`wplacer: Clearing browsing data for ${origins.join(', ')}`);
     chrome.browsingData.remove({
-        origins: [origin]
+        origins: origins
     }, {
         cache: true,
         cookies: true,
@@ -336,7 +400,7 @@ const quickLogout = (callback) => {
             if (callback) callback({ success: false, error: "Failed to clear data." });
         } else {
             console.log("wplacer: Browsing data cleared successfully. Reloading wplace.live tabs.");
-            chrome.tabs.query({ url: "https://wplace.live/*" }, (tabs) => {
+            chrome.tabs.query({ url: "https://bplace.org/*" }, (tabs) => {
                 if (tabs && tabs.length > 0) {
                     tabs.forEach(tab => chrome.tabs.reload(tab.id));
                 }
@@ -368,7 +432,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         if (window.__wplacerPawtectHooked) return;
                         window.__wplacerPawtectHooked = true;
 
-                        const backend = 'https://backend.wplace.live';
+                        const backend = 'https://bplace.org';
                         
                         const findPawtectPath = async () => {
                             const cacheKey = 'wplacer_pawtect_path';
@@ -563,7 +627,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     func: (rawBody) => {
                         (async () => {
                             try {
-                                const backend = 'https://backend.wplace.live';
+                                const backend = 'https://bplace.org';
                                 const url = `${backend}/s0/pixel/1/1`;
                                 
                                 const findPawtectPath = async () => {
@@ -664,7 +728,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     func: (tValue) => {
                         (async () => {
                             try {
-                                const backend = 'https://backend.wplace.live';
+                                const backend = 'https://bplace.org';
                                 
                                 const findPawtectPath = async () => {
                                     const cacheKey = 'wplacer_pawtect_path';
@@ -786,7 +850,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     try {
-        if (tab.url?.startsWith("https://wplace.live")) {
+        if (tab.url?.startsWith("https://bplace.org")) {
             if (changeInfo.status === 'loading') {
                 // preinstall pawtect early
                 injectPawtectIntoTab(tabId).catch(() => {});
@@ -814,7 +878,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 if (TOKEN_IN_PROGRESS) return;
                 const now = Date.now();
                 if (now - LAST_RELOAD_AT < 45000) return;
-                const tabs = await chrome.tabs.query({ url: "https://wplace.live/*" });
+                const tabs = await chrome.tabs.query({ url: "https://bplace.org/*" });
                 for (const tab of tabs || []) {
                     try {
                         await injectPawtectIntoTab(tab.id);

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "WPlacer AutoLogin",
+  "name": "BPlacer AutoLogin",
   "version": "1.5.0",
-  "description": "Checks the 'j' cookie on wplace.live and, if missing, triggers auto-login via Google and updates the token.",
+  "description": "Checks the 'j' cookie on bplace.org and, if missing, triggers auto-login via Google and updates the token.",
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -22,13 +22,13 @@
       "world": "MAIN"
     },
     {
-      "matches": ["https://wplace.live/*", "https://*.wplace.live/*"],
+      "matches": ["https://bplace.org/*", "https://*.bplace.org/*"],
       "run_at": "document_start",
       "all_frames": false,
       "js": ["wplace.js"]
     },
     {
-      "matches": ["https://backend.wplace.live/*"],
+      "matches": ["https://backend.bplace.org/*"],
       "run_at": "document_start",
       "all_frames": true,
       "js": ["inject-turnstile.js"]
@@ -48,9 +48,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://wplace.live/*",
-    "https://*.wplace.live/*",
-    "https://backend.wplace.live/*",
+    "https://bplace.org/*",
+    "https://*.bplace.org/*",
+    "https://backend.bplace.org/*",
     "https://accounts.google.com/*",
     "*://challenges.cloudflare.com/*",
     "http://127.0.0.1/*"

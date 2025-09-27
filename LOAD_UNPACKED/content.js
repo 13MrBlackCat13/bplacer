@@ -65,7 +65,7 @@ window.addEventListener('message', (event) => {
             try {
                 chrome.runtime.sendMessage({
                     action: 'computePawtectForT',
-                    url: 'https://backend.wplace.live/s0/pixel/1/1',
+                    url: 'https://bplace.org/s0/pixel/1/1',
                     bodyStr: JSON.stringify(body)
                 });
             } catch {}

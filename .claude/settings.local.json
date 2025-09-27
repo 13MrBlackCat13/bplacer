@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm start)",
+      "Bash(npm install)",
+      "Bash(curl:*)",
+      "Read(//c/tmp/**)",
+      "Bash(nslookup:*)",
+      "Bash(ping:*)",
+      "Bash(rg:*)",
+      "Bash(tasklist)",
+      "Bash(findstr:*)",
+      "Bash(node:*)",
+      "Bash(tasklist:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(Get-Process)",
+      "Bash(Where-Object {$_rocessName -eq \"node\"})",
+      "Bash(Stop-Process -Force)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

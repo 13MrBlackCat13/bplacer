@@ -3021,7 +3021,7 @@ checkUserStatus.addEventListener("click", async () => {
                         <p><b>What you can do</b></p>
                         <ul>
                             <li>After some time, manually re‑check red‑marked accounts (the middle button <img style="width:20px;height:20px;background: #515151;padding: 3px;border-radius: 5px;" src="icons/code.svg">).</li>
-                            <li>If manual check still fails, the token is likely expired. To refresh it, load the extension in your browser/profile, sign in to wplace.live on that account — the extension will update the token automatically.</li>
+                            <li>If manual check still fails, the token is likely expired. To refresh it, load the extension in your browser/profile, sign in to bplace.org on that account — the extension will update the token automatically.</li>
                         </ul>
                         <p><b>Totals and “Show latest information”</b></p>
                         <ul>

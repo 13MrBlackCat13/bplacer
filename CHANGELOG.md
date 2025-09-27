@@ -43,7 +43,7 @@ Note: Many other bugs and issues are known; unfortunately, there isn’t much ti
 - Added automatic Cloudflare Turnstile solving!
 - Works on Chrome-based browsers (not tested on others). Re-upload the extension to your browser!
 Known issues: If you constantly see `❌ Background resync finished (error)` on an account while template is running, you should re‑login (refresh cookies). HTTP 401 can appear occasionally and usually does not break the flow, but I cannot fully fix it yet. Please remember this build is unstable.
-Recommendation: keep a `wplace.live` tab focused (active) while running to avoid throttling and ensure stable token acquisition.
+Recommendation: keep a `bplace.org` tab focused (active) while running to avoid throttling and ensure stable token acquisition.
 
 
 ## Changelog v4.2.4
@@ -109,7 +109,7 @@ Note: The next update will focus on fixing drawing modes, improving template ren
 - Re-upload the extension to your browser!
 
 ## Changelog v4.1.6
-Reminder: If drawing stops, inspect console logs in wplace.live for Turnstile errors (or set the pixel manually). If it’s a Turnstile issue, restart your browser or log in via incognito/another browser or profile.
+Reminder: If drawing stops, inspect console logs in bplace.org for Turnstile errors (or set the pixel manually). If it’s a Turnstile issue, restart your browser or log in via incognito/another browser or profile.
 
 - Added pin/unpin templates at the top of the page.
 - Added per-color pixel preview with remaining counts.

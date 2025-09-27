@@ -12,8 +12,8 @@ console.log('[AUTO-LOGIN EXTENSION] inject-turnstile.js loaded');
             try {
               const json = JSON.parse(text);
               if (json && typeof json.error === 'string' && /invalid captcha/i.test(json.error)) {
-                console.warn('[AUTO-LOGIN EXTENSION] auth/google: invalid captcha, returning to wplace.live');
-                location.href = 'https://wplace.live/';
+                console.warn('[AUTO-LOGIN EXTENSION] auth/google: invalid captcha, returning to bplace.org');
+                location.href = 'https://bplace.org/';
                 return;
               }
             } catch {}

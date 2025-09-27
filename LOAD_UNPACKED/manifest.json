@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "wplacer - forked by lllexxa",
+  "name": "bplacer - forked by lllexxa",
   "version": "4.6",
-  "description": "Automatically sends session and Turnstile tokens from wplace.live to a wplacer server.",
+  "description": "Automatically sends session and Turnstile tokens from bplace.org to a bplacer server.",
   "permissions": [
     "storage",
     "cookies",
@@ -12,8 +12,7 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://wplace.live/",
-    "https://backend.wplace.live/",
+    "https://bplace.org/*",
     "http://127.0.0.1/*"
   ],
   "action": {
@@ -30,7 +29,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://wplace.live/*"
+        "https://bplace.org/*"
       ],
       "js": [
         "content.js"

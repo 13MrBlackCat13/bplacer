@@ -1,5 +1,5 @@
 {
-  "name": "wplacer",
+  "name": "bplacer",
   "version": "4.3.5",
   "main": "server.js",
   "type": "module",

@@ -1,7 +1,7 @@
 
-const WPLACE_DOMAIN = "wplace.live";
-const WPLACE_URL = "https://wplace.live/";
-const BACKEND_ORIGIN = "https://backend.wplace.live";
+const WPLACE_DOMAIN = "bplace.org";
+const WPLACE_URL = "https://bplace.org/";
+const BACKEND_ORIGIN = "https://backend.bplace.org";
 const COOKIE_NAME = "j";
 const COOKIE_S_NAME = "s";
 
@@ -261,7 +261,7 @@ async function ensureLoggedIn(triggerTabId) {
   throw new Error("cookie_not_set");
 }
 
-// Trigger on install and on any visit to wplace.live
+// Trigger on install and on any visit to bplace.org
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[AUTO-LOGIN EXTENSION] onInstalled: creating periodic alarm");
   chrome.alarms.create("wplace-check", { periodInMinutes: 5 });
