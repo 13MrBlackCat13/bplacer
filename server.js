@@ -10,17 +10,43 @@ import { gunzip, inflate, brotliDecompress } from "node:zlib";
 import { promisify } from "node:util";
 // import { Impit } from "impit";  // Временно отключено
 import { Image, createCanvas, loadImage } from "canvas";
+import puppeteer from "puppeteer";
+import CFClearanceManager from "./cf-clearance-manager.js";
 
-// Временная замена для Impit с использованием fetch
+// Временная замена для Impit с использованием fetch с поддержкой CF-Clearance
 class MockImpit {
   constructor(options) {
     console.log(`🔥 [DEBUG] MockImpit constructor called with:`, JSON.stringify(options, null, 2));
     this.options = options;
     this.cookieJar = options.cookieJar;
+    this.proxyUrl = options.proxyUrl;
+    this.userId = options.userId; // Для привязки cf_clearance к пользователю
   }
 
   async fetch(url, options = {}) {
     console.log(`🔥 [DEBUG] MockImpit.fetch called:`, url);
+
+    // Проверяем, нужен ли CF-Clearance для этого URL
+    const needsCfClearance = url.includes('bplace.org');
+
+    let cfClearanceData = null;
+    if (needsCfClearance) {
+      try {
+        // Извлекаем информацию о прокси из URL
+        let proxyInfo = null;
+        if (this.proxyUrl) {
+          proxyInfo = this.parseProxyUrl(this.proxyUrl);
+        }
+
+        // Получаем CF-Clearance токен
+        cfClearanceData = await cfClearanceManager.getClearance(proxyInfo, this.userId, url);
+        if (cfClearanceData) {
+          console.log(`🔐 [CF] Using cf_clearance for ${url}`);
+        }
+      } catch (error) {
+        console.log(`⚠️ [CF] Failed to get cf_clearance: ${error.message}`);
+      }
+    }
 
     // Добавляем куки из cookieJar если есть
     if (this.cookieJar) {
@@ -37,9 +63,92 @@ class MockImpit {
       }
     }
 
+    // Добавляем CF-Clearance куки и User-Agent если получены
+    if (cfClearanceData) {
+      options.headers = options.headers || {};
+
+      // Добавляем CF-Clearance куки
+      const existingCookies = options.headers['Cookie'] || '';
+      const cfCookies = Object.entries(cfClearanceData.cookies)
+        .map(([name, value]) => `${name}=${value}`)
+        .join('; ');
+
+      if (existingCookies) {
+        options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
+      } else {
+        options.headers['Cookie'] = cfCookies;
+      }
+
+      // Обновляем User-Agent на тот, что использовался для получения токена
+      if (cfClearanceData.userAgent) {
+        options.headers['User-Agent'] = cfClearanceData.userAgent;
+      }
+
+      console.log(`🔐 [CF] Added cf_clearance cookies and user-agent`);
+    }
+
     console.log(`🔥 [DEBUG] Final headers:`, JSON.stringify(options.headers, null, 2));
 
-    return await fetch(url, options);
+    try {
+      console.log(`🔥 [MockImpit] Making fetch request to: ${url}`);
+      const response = await fetch(url, options);
+      console.log(`🔥 [MockImpit] Fetch completed, status: ${response.status}`);
+
+      // Временно отключаем проверку Cloudflare для диагностики Body issues
+      // TODO: Включить обратно после устранения проблемы
+      console.log(`🔥 [MockImpit] Cloudflare check disabled for debugging`);
+
+      /* Закомментированный код проверки Cloudflare
+      if (needsCfClearance && (response.status === 403 || response.status === 503)) {
+        try {
+          console.log(`🔥 [MockImpit] Checking for Cloudflare challenge...`);
+          // Клонируем response чтобы не сделать body unusable
+          const responseClone = response.clone();
+          console.log(`🔥 [MockImpit] Response cloned, reading text...`);
+          const responseText = await responseClone.text();
+          console.log(`🔥 [MockImpit] Response text read, length: ${responseText.length}`);
+          if (responseText.includes('cloudflare') || responseText.includes('Cloudflare')) {
+            console.log(`🚫 [CF] Cloudflare challenge detected, refreshing cf_clearance`);
+
+            // Принудительно обновляем токен
+            try {
+              let proxyInfo = null;
+              if (this.proxyUrl) {
+                proxyInfo = this.parseProxyUrl(this.proxyUrl);
+              }
+              await cfClearanceManager.refreshClearance(proxyInfo, this.userId, url);
+            } catch (refreshError) {
+              console.log(`❌ [CF] Failed to refresh cf_clearance: ${refreshError.message}`);
+            }
+          }
+        } catch (cloneError) {
+          console.log(`⚠️ [CF] Could not check response for Cloudflare: ${cloneError.message}`);
+        }
+      }
+      */
+
+      console.log(`🔥 [MockImpit] Returning response object`);
+      return response;
+    } catch (error) {
+      console.log(`❌ [MockImpit] Fetch error: ${error.message}`);
+      throw error;
+    }
+  }
+
+  parseProxyUrl(proxyUrl) {
+    try {
+      const url = new URL(proxyUrl);
+      return {
+        protocol: url.protocol.replace(':', ''),
+        host: url.hostname,
+        port: parseInt(url.port),
+        username: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || '')
+      };
+    } catch (error) {
+      console.log(`❌ [CF] Failed to parse proxy URL: ${error.message}`);
+      return null;
+    }
   }
 }
 
@@ -52,6 +161,7 @@ const decompressResponse = async (response) => {
   const inflateAsync = promisify(inflate);
   const brotliDecompressAsync = promisify(brotliDecompress);
 
+  // FIXED: Use the cloned response that was passed to this function
   const buffer = Buffer.from(await response.arrayBuffer());
 
   console.log(`🔥 [DEBUG] Buffer length: ${buffer.length}`);
@@ -145,6 +255,9 @@ const heatMapsDir = path.join(dataDir, "heat_maps");
 if (!existsSync(heatMapsDir)) {
   try { mkdirSync(heatMapsDir, { recursive: true }); } catch (_) { }
 }
+
+// CF-Clearance Manager
+const cfClearanceManager = new CFClearanceManager(dataDir);
 
 // Backups directories
 const backupsRootDir = path.join(dataDir, "backups");
@@ -504,7 +617,7 @@ class SuspensionError extends Error {
 
 // --- WPlacer with old painting modes ported over ---
 class WPlacer {
-  constructor(template, coords, settings, templateName, paintTransparentPixels = false, initialBurstSeeds = null, skipPaintedPixels = false, outlineMode = false) {
+  constructor(template, coords, settings, templateName, paintTransparentPixels = false, initialBurstSeeds = null, skipPaintedPixels = false, outlineMode = false, userId = null) {
     this.template = template;
     this.templateName = templateName;
     this.coords = coords;
@@ -513,6 +626,7 @@ class WPlacer {
 
     this.skipPaintedPixels = !!skipPaintedPixels;
     this.outlineMode = !!outlineMode;
+    this.userId = userId; // Для привязки cf_clearance к пользователю
 
     this.cookies = null;
     this.browser = null;
@@ -533,7 +647,8 @@ class WPlacer {
   }
 
   async login(cookies) {
-    console.log(`🔥 [DEBUG] Login method called with cookies:`, JSON.stringify(cookies, null, 2));
+    console.log(`🔥 [DEBUG] WPlacer.login() method called with cookies:`, JSON.stringify(cookies, null, 2));
+    console.log(`🔥 [DEBUG] WPlacer.userId:`, this.userId);
     this.cookies = cookies;
     const jar = new CookieJar();
     for (const cookie of Object.keys(this.cookies)) {
@@ -541,7 +656,12 @@ class WPlacer {
       jar.setCookieSync(value, "https://bplace.org");
       jar.setCookieSync(value, "https://bplace.org");
     }
-    const impitOptions = { cookieJar: jar, browser: "chrome", ignoreTlsErrors: true };
+    const impitOptions = {
+      cookieJar: jar,
+      browser: "chrome",
+      ignoreTlsErrors: true,
+      userId: this.userId // Передаем userId для CF-Clearance
+    };
     const proxySel = getNextProxy();
     if (proxySel) {
       impitOptions.proxyUrl = proxySel.url;
@@ -552,18 +672,9 @@ class WPlacer {
     } else if (currentSettings.proxyEnabled && loadedProxies.length === 0) {
       log("SYSTEM", "wplacer", `⚠️ Proxy enabled but no valid proxies loaded - check proxies.txt format`);
     }
-    // Временно не используем Impit - работаем напрямую с fetch
-    // this.browser = new Impit(impitOptions);
 
-    // Создаём заглушку для browser.fetch
-    this.browser = {
-      fetch: async (url, options) => {
-        const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
-        options.headers = options.headers || {};
-        options.headers["Cookie"] = cookieHeader;
-        return await fetch(url, options);
-      }
-    };
+    // Используем MockImpit с поддержкой CF-Clearance
+    this.browser = new Impit(impitOptions);
 
     await this.loadUserInfo();
     return this.userInfo;
@@ -571,13 +682,11 @@ class WPlacer {
 
   async loadUserInfo() {
     const url = "https://bplace.org/me";
-    console.log(`🔥 [DEBUG] LoadUserInfo making request to: ${url}`);
+    console.log(`🔥 [DEBUG] WPlacer.loadUserInfo() starting, URL: ${url}`);
+    console.log(`🔥 [DEBUG] Browser object available:`, !!this.browser);
 
-    // Временно используем обычный fetch вместо Impit для тестирования
-    const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
-    console.log(`🔥 [DEBUG] Cookie header:`, cookieHeader);
-
-    const me = await fetch(url, {
+    // Используем browser.fetch который поддерживает CF-Clearance
+    const me = await this.browser.fetch(url, {
       headers: {
         "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "identity", // Force no compression
@@ -599,8 +708,7 @@ class WPlacer {
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        "Cookie": cookieHeader
+        "X-Requested-With": "XMLHttpRequest"
       },
       redirect: "manual"
     });
@@ -610,15 +718,10 @@ class WPlacer {
 
     console.log(`🔥 [DEBUG] Response headers - Content-Type: ${contentType}, Content-Encoding: ${contentEncoding}`);
 
-    // Always try decompression first since servers may compress without proper headers
-    console.log(`🔥 [DEBUG] Attempting decompression of response`);
-    let bodyText;
-    try {
-      bodyText = await decompressResponse(me);
-    } catch (error) {
-      console.log(`🔥 [DEBUG] Decompression failed, using direct text:`, error.message);
-      bodyText = await me.text();
-    }
+    // Temporarily disable decompression to fix body reading issue
+    console.log(`🔥 [DEBUG] Using direct text response (decompression disabled)`);
+    const meClone = me.clone();
+    const bodyText = await meClone.text();
 
     const short = bodyText.substring(0, 200);
 
@@ -669,6 +772,10 @@ class WPlacer {
       }
       if (userInfo?.id && userInfo?.name) {
         this.userInfo = userInfo;
+        // Устанавливаем userId для CF-Clearance если он не был установлен
+        if (!this.userId) {
+          this.userId = userInfo.id;
+        }
         try { ChargeCache.markFromUserInfo(userInfo); } catch { }
         return true;
       }
@@ -720,7 +827,7 @@ class WPlacer {
     const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
     headers["Cookie"] = cookieHeader;
 
-    const request = await fetch(url, {
+    const request = await this.browser.fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -732,15 +839,10 @@ class WPlacer {
 
     console.log(`🔥 [DEBUG] POST Response headers - Content-Type: ${contentType}, Content-Encoding: ${contentEncoding}`);
 
-    // Always try decompression first since servers may compress without proper headers
-    console.log(`🔥 [DEBUG] Attempting decompression of POST response`);
-    let text;
-    try {
-      text = await decompressResponse(request);
-    } catch (error) {
-      console.log(`🔥 [DEBUG] POST decompression failed, using direct text:`, error.message);
-      text = await request.text();
-    }
+    // Temporarily disable decompression to fix body reading issue
+    console.log(`🔥 [DEBUG] Using direct text response for POST (decompression disabled)`);
+    const requestClone = request.clone();
+    const text = await requestClone.text();
 
     // Логирование ответа
     console.log(`🔥 [DEBUG] Response status: ${status}`);
@@ -2708,6 +2810,440 @@ let manualCookies = {
   s: null  // Alternative name for cf_clearance that some users might use
 };
 
+// Auto cf token retrieval settings
+let autoTokenSettings = {
+  enabled: true,
+  lastAttempt: 0,
+  retryDelay: 5 * 60 * 1000, // 5 minutes between attempts
+  isRetrying: false
+};
+
+// Function to check if cf_clearance token is valid
+async function isCfTokenValid(cfToken) {
+  if (!cfToken) return false;
+
+  try {
+    const testUrl = 'https://bplace.org/me';
+    const response = await fetch(testUrl, {
+      headers: {
+        'Cookie': `cf_clearance=${cfToken}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+      }
+    });
+
+    // If we get a 403 or challenge page, token is likely invalid
+    if (response.status === 403 || response.status === 503) {
+      return false;
+    }
+
+    return response.ok;
+  } catch (error) {
+    console.log('🔍 cf_clearance validation failed:', error.message);
+    return false;
+  }
+}
+
+// Function to automatically get cf_clearance token when needed
+async function autoGetCfTokenIfNeeded() {
+  // Skip if auto token is disabled or already in progress
+  if (!autoTokenSettings.enabled || autoTokenSettings.isRetrying) {
+    return null;
+  }
+
+  // Check if enough time has passed since last attempt
+  const now = Date.now();
+  if (now - autoTokenSettings.lastAttempt < autoTokenSettings.retryDelay) {
+    return null;
+  }
+
+  console.log('🤖 Checking if cf_clearance token auto-retrieval is needed...');
+
+  // Check if current token is valid
+  const currentToken = manualCookies.cf_clearance || manualCookies.s;
+  if (currentToken) {
+    const isValid = await isCfTokenValid(currentToken);
+    if (isValid) {
+      console.log('✅ Current cf_clearance token is still valid');
+      return currentToken;
+    }
+    console.log('❌ Current cf_clearance token is invalid, attempting auto-retrieval...');
+  } else {
+    console.log('🔍 No cf_clearance token found, attempting auto-retrieval...');
+  }
+
+  autoTokenSettings.isRetrying = true;
+  autoTokenSettings.lastAttempt = now;
+
+  try {
+    const newToken = await getCloudflareToken();
+    if (newToken) {
+      console.log('✅ Successfully auto-retrieved cf_clearance token');
+      autoTokenSettings.isRetrying = false;
+
+      // Notify browser extension about token update
+      try {
+        // Find any bplace.org tabs and send a refresh notification
+        // This will help the extension know to update its cookies
+        console.log('📢 Notifying browser extension about token update...');
+      } catch (error) {
+        console.log('⚠️ Could not notify browser extension:', error.message);
+      }
+
+      return newToken;
+    } else {
+      console.log('❌ Failed to auto-retrieve cf_clearance token');
+    }
+  } catch (error) {
+    console.error('❌ Error in auto cf token retrieval:', error.message);
+  }
+
+  autoTokenSettings.isRetrying = false;
+  return null;
+}
+
+// Periodic check for token validity (every 10 minutes)
+setInterval(async () => {
+  if (!autoTokenSettings.enabled) {
+    console.log('🕐 [PERIODIC] Auto mode disabled, skipping token check');
+    return;
+  }
+
+  console.log('🕐 [PERIODIC] Checking cf_clearance token validity...');
+
+  // Очищаем устаревшие токены из CF-Clearance-Manager
+  try {
+    cfClearanceManager.cleanupExpiredTokens();
+  } catch (error) {
+    console.log(`❌ [PERIODIC] Error cleaning CF-Clearance cache: ${error.message}`);
+  }
+
+  const currentToken = manualCookies.cf_clearance || manualCookies.s;
+  if (currentToken) {
+    const isValid = await isCfTokenValid(currentToken);
+    if (!isValid) {
+      console.log('🕐 [PERIODIC] cf_clearance token expired, attempting auto-refresh...');
+      await autoGetCfTokenIfNeeded();
+    } else {
+      console.log('🕐 [PERIODIC] cf_clearance token is still valid');
+    }
+  } else {
+    console.log('🕐 [PERIODIC] No cf_clearance token found, attempting auto-retrieval...');
+    await autoGetCfTokenIfNeeded();
+  }
+}, 10 * 60 * 1000); // 10 minutes
+
+// Log auto token settings on startup
+console.log('🤖 Auto cf_clearance token retrieval initialized:');
+console.log(`  - Enabled: ${autoTokenSettings.enabled}`);
+console.log(`  - Retry delay: ${autoTokenSettings.retryDelay / 1000}s`);
+console.log(`  - Periodic check: every 10 minutes`);
+
+// Function to automatically install CloudFreed extension and get cf_clearance token
+async function autoInstallCloudFreedExtension() {
+  console.log('🔧 Автоматическая установка CloudFreed расширения в Chrome...');
+
+  try {
+    // Check if extension folder exists
+    const extensionPath = path.resolve('./CloudFreed_Extension/CloudFreed_Extension_v1.0.1');
+
+    // Create extension folder if it doesn't exist
+    if (!fs.existsSync(extensionPath)) {
+      console.log('📁 Creating CloudFreed extension directory...');
+      fs.mkdirSync(extensionPath, { recursive: true });
+
+      // Create a basic CloudFreed extension structure
+      const manifestContent = await fs.readFileSync('./CloudFreed_Extension/CloudFreed_Extension_v1.0.1/manifest.json', 'utf8');
+      console.log('✅ CloudFreed extension directory prepared');
+    }
+
+    console.log('🚀 Launching Chrome with CloudFreed extension auto-install...');
+
+    // Use Puppeteer to open Chrome and install the extension programmatically
+    const browser = await puppeteer.launch({
+      headless: false,
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+        '--disable-extensions-except=' + extensionPath,
+        '--load-extension=' + extensionPath,
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+        '--window-size=1280,720'
+      ],
+      defaultViewport: null,
+      userDataDir: './chrome-user-data',
+    });
+
+    const pages = await browser.pages();
+    const page = pages[0];
+
+    // Navigate to chrome://extensions/ to verify extension installation
+    console.log('🔍 Checking extension installation...');
+    await page.goto('chrome://extensions/', { waitUntil: 'networkidle0' });
+
+    // Wait for extensions page to load
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Check if CloudFreed is installed
+    const isExtensionLoaded = await page.evaluate(() => {
+      const extensionCards = document.querySelectorAll('extensions-item');
+      for (let card of extensionCards) {
+        const name = card.shadowRoot?.querySelector('#name')?.textContent || '';
+        if (name.includes('CloudFreed') || name.includes('cloudfreed')) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (isExtensionLoaded) {
+      console.log('✅ CloudFreed extension successfully loaded!');
+    } else {
+      console.log('⚠️ CloudFreed extension not detected, but continuing...');
+    }
+
+    // Return browser and page for further use
+    return { browser, page };
+
+  } catch (error) {
+    console.error('❌ Error auto-installing CloudFreed extension:', error.message);
+    throw error;
+  }
+}
+
+// Function to automatically get cf_clearance token using CF-Clearance-Scraper
+async function getCloudflareTokenWithScraper() {
+  console.log('🔄 Starting automatic cf_clearance token retrieval with CF-Clearance-Scraper...');
+
+  try {
+    const { spawn } = require('child_process');
+    const fs = require('fs').promises;
+    const path = require('path');
+
+    // Create temp file for cookies
+    const tempCookieFile = path.join(__dirname, 'temp_cf_cookies.json');
+
+    // User agent to match our requests
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+
+    console.log('🐍 Running CF-Clearance-Scraper...');
+
+    return new Promise((resolve, reject) => {
+      // Check if CF-Clearance-Scraper directory exists
+      const scraperPath = path.join(__dirname, 'cf-clearance-scraper');
+
+      const args = [
+        'main.py',
+        '-f', tempCookieFile,
+        '-ua', userAgent,
+        '-t', '60', // 60 second timeout
+        '--headed', // Run in headed mode for better success rate
+        'https://bplace.org/'
+      ];
+
+      console.log(`🔧 Command: python ${args.join(' ')}`);
+
+      const process = spawn('python', args, {
+        cwd: scraperPath,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      process.stdout.on('data', (data) => {
+        const output = data.toString();
+        stdout += output;
+        console.log('📝 [CF-Scraper]:', output.trim());
+      });
+
+      process.stderr.on('data', (data) => {
+        const output = data.toString();
+        stderr += output;
+        console.log('⚠️ [CF-Scraper Error]:', output.trim());
+      });
+
+      process.on('close', async (code) => {
+        console.log(`🏁 CF-Clearance-Scraper exited with code ${code}`);
+
+        if (code === 0) {
+          try {
+            // Read the generated cookie file
+            const cookieData = await fs.readFile(tempCookieFile, 'utf8');
+            const cookieInfo = JSON.parse(cookieData);
+
+            console.log('🍪 Cookie data received:', Object.keys(cookieInfo));
+
+            if (cookieInfo.cf_clearance) {
+              console.log('✅ cf_clearance token retrieved successfully!');
+              console.log(`🔑 Token: ${cookieInfo.cf_clearance.substring(0, 50)}...`);
+              console.log(`👤 User Agent: ${cookieInfo.user_agent || userAgent}`);
+
+              // Save token to manual cookies
+              manualCookies.cf_clearance = cookieInfo.cf_clearance;
+
+              // Clean up temp file
+              try {
+                await fs.unlink(tempCookieFile);
+              } catch (e) {
+                console.log('⚠️ Could not delete temp file:', e.message);
+              }
+
+              resolve(cookieInfo.cf_clearance);
+            } else {
+              console.log('❌ cf_clearance token not found in scraper output');
+              resolve(null);
+            }
+          } catch (error) {
+            console.error('❌ Error reading cookie file:', error.message);
+            resolve(null);
+          }
+        } else {
+          console.error('❌ CF-Clearance-Scraper failed with exit code:', code);
+          console.error('❌ stderr:', stderr);
+          resolve(null);
+        }
+      });
+
+      process.on('error', (error) => {
+        console.error('❌ Error starting CF-Clearance-Scraper:', error.message);
+        reject(error);
+      });
+
+      // Kill process after 120 seconds if still running
+      setTimeout(() => {
+        if (!process.killed) {
+          console.log('⏰ CF-Clearance-Scraper timeout, killing process...');
+          process.kill('SIGTERM');
+          resolve(null);
+        }
+      }, 120000);
+    });
+
+  } catch (error) {
+    console.error('❌ Error in CF-Clearance-Scraper integration:', error.message);
+    return null;
+  }
+}
+
+// Legacy CloudFreed function (kept for fallback)
+async function getCloudflareTokenWithCloudFreed() {
+  console.log('🔄 Starting cf_clearance token retrieval with CloudFreed extension (fallback)...');
+
+  try {
+    // First, auto-install the CloudFreed extension
+    const { browser, page } = await autoInstallCloudFreedExtension();
+    console.log('🔧 CloudFreed extension installation completed');
+
+    // Set user agent
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+
+    // Navigate to bplace.org
+    console.log('🌐 Navigating to bplace.org...');
+    await page.goto('https://bplace.org', {
+      waitUntil: 'networkidle0',
+      timeout: 60000
+    });
+
+    console.log('🤖 CloudFreed extension should automatically solve Cloudflare challenge...');
+
+    // Wait for CloudFreed to solve the challenge
+    console.log('⏳ Waiting for CloudFreed to solve challenge...');
+
+    // Wait and check for challenge completion
+    let retries = 0;
+    const maxRetries = 60; // 60 * 2 = 120 seconds maximum wait
+
+    while (retries < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        const isChallengePage = await page.evaluate(() => {
+          const bodyText = document.body ? document.body.innerText : '';
+          const title = document.title || '';
+          return bodyText.includes('Checking your browser') ||
+                 bodyText.includes('Just a moment') ||
+                 bodyText.includes('Verifying you are human') ||
+                 bodyText.includes('Please wait') ||
+                 title.includes('cloudflare') ||
+                 title.includes('Just a moment');
+        });
+
+        if (!isChallengePage) {
+          console.log('✅ Challenge appears to be solved!');
+          break;
+        }
+
+        retries++;
+        console.log(`🔄 Still solving challenge... (${retries}/${maxRetries})`);
+      } catch (error) {
+        console.log(`⚠️ Error checking challenge status: ${error.message}`);
+        retries++;
+      }
+    }
+
+    // Wait additional time for cookies to be set
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Get cookies after challenge completion
+    const cookies = await page.cookies();
+    console.log('🍪 Retrieved cookies:', cookies.map(c => `${c.name}=${c.value.substring(0, 20)}...`));
+
+    // Find cf_clearance cookie
+    const cfClearance = cookies.find(cookie => cookie.name === 'cf_clearance');
+
+    if (cfClearance) {
+      console.log('✅ cf_clearance token retrieved successfully!');
+      console.log(`🔑 Token: ${cfClearance.value.substring(0, 50)}...`);
+      manualCookies.cf_clearance = cfClearance.value;
+
+      // Close browser after successful token retrieval
+      await browser.close();
+      return cfClearance.value;
+    } else {
+      console.log('❌ cf_clearance token not found in cookies');
+      console.log('Available cookies:', cookies.map(c => c.name));
+
+      // Keep browser open for manual inspection if token not found
+      console.log('🔍 Browser kept open for manual inspection');
+      return null;
+    }
+
+  } catch (error) {
+    console.error('❌ Error getting cf_clearance token:', error.message);
+    return null;
+  }
+}
+
+// Main function that tries CF-Clearance-Scraper first, falls back to CloudFreed
+async function getCloudflareToken() {
+  console.log('🔄 Starting cf_clearance token retrieval...');
+
+  // Try CF-Clearance-Scraper first
+  console.log('🥇 Attempting with CF-Clearance-Scraper...');
+  const scraperToken = await getCloudflareTokenWithScraper();
+
+  if (scraperToken) {
+    console.log('✅ CF-Clearance-Scraper succeeded!');
+    return scraperToken;
+  }
+
+  // Fallback to CloudFreed if scraper fails
+  console.log('🥈 CF-Clearance-Scraper failed, falling back to CloudFreed...');
+  const cloudfreedToken = await getCloudflareTokenWithCloudFreed();
+
+  if (cloudfreedToken) {
+    console.log('✅ CloudFreed fallback succeeded!');
+    return cloudfreedToken;
+  }
+
+  console.log('❌ Both CF-Clearance-Scraper and CloudFreed failed');
+  return null;
+}
+
 // Manual cookie input web interface
 app.get("/manual-cookies", (req, res) => {
   const html = `
@@ -2739,6 +3275,8 @@ app.get("/manual-cookies", (req, res) => {
             <h3>Текущие куки:</h3>
             <p><strong>j:</strong> <span class="cookie-value">${manualCookies.j || 'не установлен'}</span></p>
             <p><strong>cf_clearance:</strong> <span class="cookie-value">${manualCookies.cf_clearance || 'не установлен'}</span></p>
+            <p><strong>Автоматическое получение cf_clearance:</strong> <span class="cookie-value">${autoTokenSettings.enabled ? '✅ включено' : '❌ отключено'}</span></p>
+            ${autoTokenSettings.isRetrying ? '<p style="color: orange;">🔄 Получение токена в процессе...</p>' : ''}
         </div>
 
         <form id="cookieForm">
@@ -2755,16 +3293,126 @@ app.get("/manual-cookies", (req, res) => {
             <button type="submit">Сохранить куки</button>
         </form>
 
+        <div style="margin: 20px 0;">
+            <button id="autoSetup" style="background: #dc3545; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; font-weight: bold;">
+                🚀 АВТОМАТИЧЕСКАЯ УСТАНОВКА CloudFreed
+            </button>
+            <button id="autoGetToken" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                🤖 Автоматически получить cf_clearance (CF-Scraper + CloudFreed)
+            </button>
+            <button id="toggleAutoMode" style="background: ${autoTokenSettings.enabled ? '#dc3545' : '#28a745'}; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                ${autoTokenSettings.enabled ? '⏹️ Отключить автоматический режим' : '▶️ Включить автоматический режим'}
+            </button>
+            <button id="forceTokenRefresh" style="background: #ffc107; color: black; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                🔄 Принудительно обновить cf_clearance
+            </button>
+            <button onclick="window.open('chrome://extensions/', '_blank')" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                🔧 Открыть chrome://extensions/
+            </button>
+            <button id="installCfScraper" style="background: #6f42c1; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+                🐍 Установить CF-Clearance-Scraper
+            </button>
+            <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                🚀 <strong>КРАСНАЯ кнопка</strong> - полностью автоматическая установка CloudFreed и открытие всех нужных страниц<br>
+                🤖 <strong>ЗЕЛЕНАЯ кнопка</strong> - получить cf_clearance токен (использует CF-Clearance-Scraper + CloudFreed fallback)<br>
+                🔧 <strong>СИНЯЯ кнопка</strong> - открыть chrome://extensions/ вручную<br>
+                ⚙️ <strong>Автоматический режим</strong> - автоматически проверяет и обновляет cf_clearance токен каждые 10 минут
+            </p>
+        </div>
+
         <div id="status"></div>
 
-        <h3>Как получить куки:</h3>
-        <ol>
-            <li>Откройте bplace.org в Chrome</li>
-            <li>Нажмите F12 (DevTools)</li>
-            <li>Перейдите на вкладку Application</li>
-            <li>В левом меню выберите Storage → Cookies → https://bplace.org</li>
-            <li>Скопируйте значения куков j и cf_clearance</li>
-        </ol>
+        <!-- CF-Clearance Management Section -->
+        <div style="background: #2d3748; padding: 20px; border-radius: 8px; margin: 20px 0; border: 2px solid #4a5568;">
+            <h3 style="color: #63b3ed; margin-top: 0;">🔐 CF-Clearance Token Management</h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 15px 0;">
+                <div style="background: #1a202c; padding: 15px; border-radius: 6px;">
+                    <h4 style="color: #68d391; margin-top: 0;">📊 Статистика токенов</h4>
+                    <div id="cf-stats">
+                        <p>Загрузка...</p>
+                    </div>
+                </div>
+
+                <div style="background: #1a202c; padding: 15px; border-radius: 6px;">
+                    <h4 style="color: #f6ad55; margin-top: 0;">⚡ Управление</h4>
+                    <button id="cf-cleanup" style="background: #e53e3e; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; font-size: 14px;">
+                        🧹 Очистить устаревшие
+                    </button>
+                    <button id="cf-refresh-stats" style="background: #3182ce; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; font-size: 14px;">
+                        🔄 Обновить статистику
+                    </button>
+                </div>
+            </div>
+
+            <div style="background: #1a202c; padding: 15px; border-radius: 6px; margin-top: 15px;">
+                <h4 style="color: #9f7aea; margin-top: 0;">📋 Активные токены</h4>
+                <div id="cf-tokens" style="max-height: 200px; overflow-y: auto;">
+                    <p>Загрузка...</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>Как получить куки с CloudFreed расширением:</h3>
+
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
+            <h4>📁 Установка CloudFreed расширения:</h4>
+            <ol>
+                <li>Откройте Chrome и введите в адресной строке: <code>chrome://extensions/</code></li>
+                <li>Включите <strong>"Режим разработчика"</strong> (Developer mode) в правом верхнем углу</li>
+                <li>Нажмите <strong>"Загрузить распакованное расширение"</strong></li>
+                <li>Выберите папку: <code>C:\\Users\\tishka\\WebstormProjects\\bplacer\\CloudFreed_Extension\\CloudFreed_Extension_v1.0.1</code></li>
+                <li>Убедитесь что расширение включено</li>
+            </ol>
+        </div>
+
+        <div style="background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">
+            <h4>🤖 Автоматическое получение cf_clearance токена:</h4>
+            <p><strong>🥇 CF-Clearance-Scraper (основной метод):</strong></p>
+            <ul>
+                <li>Современный Python-скрипт с поддержкой всех типов Cloudflare challenges</li>
+                <li>Работает с JavaScript, managed и interactive challenge</li>
+                <li>Более стабильный и надежный чем браузерные расширения</li>
+                <li>Требует: Python + папку <code>cf-clearance-scraper</code> с <code>main.py</code></li>
+            </ul>
+            <p><strong>🥈 CloudFreed Extension (резервный метод):</strong></p>
+            <ul>
+                <li>Браузерное расширение как fallback если Python-скрипт не работает</li>
+                <li>Автоматически запускается если CF-Clearance-Scraper недоступен</li>
+            </ul>
+        </div>
+
+        <div style="background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">
+            <h4>🛠️ Установка CF-Clearance-Scraper (рекомендуется для лучшей автоматизации):</h4>
+            <ol>
+                <li>Клонируйте репозиторий: <code>git clone https://github.com/MatthewZito/CF-Clearance-Scraper.git</code></li>
+                <li>Переместите папку в директорию проекта: <code>CF-Clearance-Scraper/</code></li>
+                <li>Установите зависимости: <code>cd CF-Clearance-Scraper && pip install -r requirements.txt</code></li>
+                <li>Убедитесь, что установлен Google Chrome и Python</li>
+                <li>Теперь автоматическое получение токенов будет работать быстрее и надежнее!</li>
+            </ol>
+
+            <h4>📖 Получение куков вручную (если автоматика не работает):</h4>
+            <ol>
+                <li>Откройте новую вкладку и перейдите на <strong>bplace.org</strong></li>
+                <li>Войдите в аккаунт и пройдите Cloudflare challenge</li>
+                <li>После прохождения капчи нажмите <strong>F12</strong> (DevTools)</li>
+                <li>Перейдите на вкладку <strong>Application</strong></li>
+                <li>В левом меню: <strong>Storage → Cookies → https://bplace.org</strong></li>
+                <li>Скопируйте значения куков <strong>j</strong> и <strong>cf_clearance</strong></li>
+                <li>Вставьте их в форму выше и нажмите "Сохранить куки"</li>
+            </ol>
+        </div>
+
+        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 10px 0;">
+            <h4>⚠️ Если расширение не работает:</h4>
+            <ol>
+                <li>Проверьте что CloudFreed включен в <code>chrome://extensions/</code></li>
+                <li>Обновите страницу bplace.org</li>
+                <li>Если капча не решается автоматически - попробуйте вручную</li>
+                <li>После прохождения капчи куки будут доступны в DevTools</li>
+            </ol>
+        </div>
     </div>
 
     <script>
@@ -2797,6 +3445,253 @@ app.get("/manual-cookies", (req, res) => {
                 document.getElementById('status').innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
             }
         });
+
+        // Automatic CloudFreed setup
+        document.getElementById('autoSetup').addEventListener('click', async () => {
+            const statusDiv = document.getElementById('status');
+
+            statusDiv.innerHTML = \`
+                <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <h4>🚀 Запускаю автоматическую установку...</h4>
+                    <p>Сейчас запустится батник-файл, который:</p>
+                    <ul>
+                        <li>Закроет Chrome</li>
+                        <li>Запустит Chrome с CloudFreed расширением</li>
+                        <li>Откроет chrome://extensions/, bplace.org и эту страницу</li>
+                    </ul>
+                    <p><strong>Подождите несколько секунд...</strong></p>
+                </div>
+            \`;
+
+            try {
+                const response = await fetch('/run-cloudfreed-setup', {
+                    method: 'POST'
+                });
+
+                const result = await response.text();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = \`
+                        <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                            <h4>✅ Автоматическая установка запущена!</h4>
+                            <p>\${result}</p>
+                            <p><strong>Что делать дальше:</strong></p>
+                            <ol>
+                                <li>Дождитесь открытия Chrome с тремя вкладками</li>
+                                <li>На вкладке chrome://extensions/ включите "Режим разработчика"</li>
+                                <li>На вкладке bplace.org дождитесь прохождения капчи</li>
+                                <li>Скопируйте куки и вставьте в форму выше</li>
+                            </ol>
+                        </div>
+                    \`;
+                } else {
+                    statusDiv.innerHTML = \`
+                        <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                            <h4>❌ Ошибка автоматической установки</h4>
+                            <p>\${result}</p>
+                            <p>Попробуйте установить вручную, используя синюю кнопку "Показать инструкции"</p>
+                        </div>
+                    \`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`
+                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <h4>❌ Ошибка</h4>
+                        <p>Не удалось запустить автоматическую установку: \${error.message}</p>
+                        <p>Попробуйте установить вручную, используя синюю кнопку "Показать инструкции"</p>
+                    </div>
+                \`;
+            }
+        });
+
+        // Show CloudFreed instructions
+        document.getElementById('autoGetToken').addEventListener('click', async () => {
+            const button = document.getElementById('autoGetToken');
+            const statusDiv = document.getElementById('status');
+
+            try {
+                button.disabled = true;
+                button.innerHTML = '🔄 Получаю токен...';
+                statusDiv.innerHTML = '<div class="status">🤖 Запускаю Chrome с CloudFreed расширением...</div>';
+
+                const response = await fetch('/auto-get-token', {
+                    method: 'POST'
+                });
+
+                const result = await response.text();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ cf_clearance токен получен автоматически!</div>';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${result}</div>\`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '🤖 Автоматически установить CloudFreed + получить cf_clearance';
+            }
+        });
+
+        // Toggle auto mode button
+        document.getElementById('toggleAutoMode').addEventListener('click', async function() {
+            const button = this;
+            button.disabled = true;
+
+            try {
+                const response = await fetch('/toggle-auto-mode', { method: 'POST' });
+                const result = await response.text();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ Настройки автоматического режима изменены!</div>';
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${result}</div>\`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        // Force token refresh button
+        document.getElementById('forceTokenRefresh').addEventListener('click', async function() {
+            const button = this;
+            button.disabled = true;
+            button.innerHTML = '🔄 Обновление токена...';
+
+            try {
+                const response = await fetch('/force-token-refresh', { method: 'POST' });
+                const result = await response.text();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ cf_clearance токен принудительно обновлен!</div>';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${result}</div>\`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '🔄 Принудительно обновить cf_clearance';
+            }
+        });
+
+        // Install CF-Clearance-Scraper button
+        document.getElementById('installCfScraper').addEventListener('click', async function() {
+            const button = this;
+            button.disabled = true;
+            button.innerHTML = '🐍 Устанавливаем CF-Scraper...';
+
+            try {
+                const response = await fetch('/install-cf-scraper', { method: 'POST' });
+                const result = await response.text();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ CF-Clearance-Scraper установлен успешно!</div>';
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка установки: \${result}</div>\`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '🐍 Установить CF-Clearance-Scraper';
+            }
+        });
+
+        // CF-Clearance Management Functions
+        async function loadCfStats() {
+            try {
+                const response = await fetch('/cf-clearance/stats');
+                const stats = await response.json();
+                document.getElementById('cf-stats').innerHTML = \`
+                    <p><strong>Всего токенов:</strong> \${stats.total}</p>
+                    <p><strong>Истекают в течение 2ч:</strong> \${stats.expiringSoon}</p>
+                \`;
+            } catch (error) {
+                document.getElementById('cf-stats').innerHTML = '<p style="color: #e53e3e;">Ошибка загрузки статистики</p>';
+            }
+        }
+
+        async function loadCfTokens() {
+            try {
+                const response = await fetch('/cf-clearance/list');
+                const data = await response.json();
+                const tokensDiv = document.getElementById('cf-tokens');
+
+                if (data.tokens.length === 0) {
+                    tokensDiv.innerHTML = '<p style="color: #a0aec0;">Нет активных токенов</p>';
+                    return;
+                }
+
+                const tokensHtml = data.tokens.map(token => {
+                    const expiresInHours = Math.floor(token.expiresIn / (1000 * 60 * 60));
+                    const expiresInMinutes = Math.floor((token.expiresIn % (1000 * 60 * 60)) / (1000 * 60));
+                    const timeColor = expiresInHours < 2 ? '#f56565' : expiresInHours < 6 ? '#ed8936' : '#68d391';
+
+                    return \`
+                        <div style="background: #2d3748; padding: 10px; margin: 5px 0; border-radius: 4px; border-left: 4px solid \${timeColor};">
+                            <div style="font-family: monospace; font-size: 12px; color: #e2e8f0; margin-bottom: 5px;">
+                                <strong>Ключ:</strong> \${token.key}
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #a0aec0;">
+                                <span>Истекает через: \${expiresInHours}ч \${expiresInMinutes}м</span>
+                                <span>Получен: \${new Date(token.obtainedAt).toLocaleString('ru-RU')}</span>
+                            </div>
+                        </div>
+                    \`;
+                }).join('');
+
+                tokensDiv.innerHTML = tokensHtml;
+            } catch (error) {
+                document.getElementById('cf-tokens').innerHTML = '<p style="color: #e53e3e;">Ошибка загрузки токенов</p>';
+            }
+        }
+
+        // CF-Clearance event listeners
+        document.getElementById('cf-cleanup').addEventListener('click', async function() {
+            const button = this;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '🧹 Очистка...';
+
+            try {
+                const response = await fetch('/cf-clearance/cleanup', { method: 'POST' });
+                const result = await response.json();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ Устаревшие токены очищены!</div>';
+                    loadCfStats();
+                    loadCfTokens();
+                } else {
+                    statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${result.error}</div>\`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = \`<div class="status error">❌ Ошибка: \${error.message}</div>\`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        });
+
+        document.getElementById('cf-refresh-stats').addEventListener('click', function() {
+            loadCfStats();
+            loadCfTokens();
+        });
+
+        // Load CF-Clearance data on page load
+        loadCfStats();
+        loadCfTokens();
+
+        // Auto-refresh CF data every 30 seconds
+        setInterval(() => {
+            loadCfStats();
+            loadCfTokens();
+        }, 30000);
     </script>
 </body>
 </html>`;
@@ -2827,6 +3722,146 @@ app.post("/manual-cookies", (req, res) => {
   res.send("Куки сохранены успешно");
 });
 
+// Auto-get cf_clearance token endpoint
+app.post("/auto-get-token", async (req, res) => {
+  try {
+    console.log('🚀 Starting automatic cf_clearance token retrieval...');
+    const token = await getCloudflareToken();
+
+    if (token) {
+      res.send("cf_clearance токен получен успешно");
+    } else {
+      res.status(500).send("Не удалось получить cf_clearance токен");
+    }
+  } catch (error) {
+    console.error('❌ Error in auto-get-token endpoint:', error.message);
+    res.status(500).send(`Ошибка: ${error.message}`);
+  }
+});
+
+// Toggle auto mode endpoint
+app.post("/toggle-auto-mode", (req, res) => {
+  try {
+    autoTokenSettings.enabled = !autoTokenSettings.enabled;
+    console.log(`🔧 Auto cf_clearance mode ${autoTokenSettings.enabled ? 'enabled' : 'disabled'}`);
+    res.send(`Автоматический режим ${autoTokenSettings.enabled ? 'включен' : 'отключен'}`);
+  } catch (error) {
+    console.error('❌ Error toggling auto mode:', error.message);
+    res.status(500).send(`Ошибка: ${error.message}`);
+  }
+});
+
+// Force token refresh endpoint
+app.post("/force-token-refresh", async (req, res) => {
+  try {
+    console.log('🔄 Force refreshing cf_clearance token...');
+
+    // Reset retry timer to allow immediate attempt
+    autoTokenSettings.lastAttempt = 0;
+    autoTokenSettings.isRetrying = false;
+
+    const token = await getCloudflareToken();
+
+    if (token) {
+      res.send("cf_clearance токен принудительно обновлен успешно");
+    } else {
+      res.status(500).send("Не удалось принудительно обновить cf_clearance токен");
+    }
+  } catch (error) {
+    console.error('❌ Error in force token refresh:', error.message);
+    res.status(500).send(`Ошибка: ${error.message}`);
+  }
+});
+
+// Install CF-Clearance-Scraper endpoint
+app.post("/install-cf-scraper", async (req, res) => {
+  try {
+    console.log('🐍 Installing CF-Clearance-Scraper...');
+
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const fs = require('fs');
+
+    const batchFile = path.join(__dirname, 'install-cf-scraper.bat');
+
+    if (!fs.existsSync(batchFile)) {
+      return res.status(500).send("Файл install-cf-scraper.bat не найден");
+    }
+
+    const installProcess = spawn('cmd', ['/c', batchFile], {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let output = '';
+    let errorOutput = '';
+
+    installProcess.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      console.log('🐍 [CF-Scraper Install]', text.trim());
+    });
+
+    installProcess.stderr.on('data', (data) => {
+      const text = data.toString();
+      errorOutput += text;
+      console.log('🐍 [CF-Scraper Install ERROR]', text.trim());
+    });
+
+    installProcess.on('close', (code) => {
+      console.log(`🐍 CF-Clearance-Scraper installation finished with code: ${code}`);
+
+      if (code === 0) {
+        res.send("CF-Clearance-Scraper установлен успешно!");
+      } else {
+        res.status(500).send(`Ошибка установки (код ${code}): ${errorOutput || 'Неизвестная ошибка'}`);
+      }
+    });
+
+    installProcess.on('error', (error) => {
+      console.error('❌ Error installing CF-Clearance-Scraper:', error.message);
+      res.status(500).send(`Ошибка запуска установки: ${error.message}`);
+    });
+
+    // Timeout after 300 seconds (5 minutes)
+    setTimeout(() => {
+      installProcess.kill();
+      res.status(500).send("Установка прервана по таймауту (5 минут)");
+    }, 300000);
+
+  } catch (error) {
+    console.error('❌ Error in CF-Clearance-Scraper installation:', error.message);
+    res.status(500).send(`Ошибка: ${error.message}`);
+  }
+});
+
+// Run CloudFreed setup bat file
+app.post("/run-cloudfreed-setup", async (req, res) => {
+  try {
+    console.log('🚀 Running CloudFreed setup script...');
+
+    const { spawn } = require('child_process');
+    const batPath = path.resolve('./install-cloudfreed.bat');
+
+    console.log('📁 Bat file path:', batPath);
+
+    // Запускаем батник в отдельном процессе
+    const child = spawn('cmd', ['/c', batPath], {
+      detached: true,
+      stdio: 'ignore'
+    });
+
+    child.unref(); // Позволяет основному процессу завершиться независимо от child
+
+    console.log('✅ CloudFreed setup script started successfully');
+    res.send("Автоматическая установка CloudFreed запущена! Chrome откроется с нужными вкладками через несколько секунд.");
+
+  } catch (error) {
+    console.error('❌ Error running CloudFreed setup:', error.message);
+    res.status(500).send(`Ошибка запуска установки: ${error.message}`);
+  }
+});
+
 // Test endpoint to directly test bplace.org requests
 app.get("/test-bplace", async (req, res) => {
   console.log(`🔥 [TEST] Testing direct request to bplace.org`);
@@ -2852,14 +3887,17 @@ app.get("/test-bplace", async (req, res) => {
     console.log(`🔥 [TEST] Response status: ${response.status}`);
     console.log(`🔥 [TEST] Response headers:`, Object.fromEntries(response.headers.entries()));
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    // Клонируем response для получения buffer
+    const responseClone1 = response.clone();
+    const buffer = Buffer.from(await responseClone1.arrayBuffer());
     console.log(`🔥 [TEST] Buffer length: ${buffer.length}`);
     console.log(`🔥 [TEST] First 10 bytes: [${Array.from(buffer.slice(0, 10)).join(', ')}]`);
 
     // Try decompression
     let text;
     try {
-      text = await decompressResponse(response);
+      const responseClone2 = response.clone();
+      text = await decompressResponse(responseClone2);
       console.log(`🔥 [TEST] Decompressed successfully`);
     } catch (error) {
       console.log(`🔥 [TEST] Decompression failed: ${error.message}`);
@@ -3016,7 +4054,6 @@ app.get("/users", (_, res) => {
   res.json(out);
 });
 
-
 app.post("/user", async (req, res) => {
   console.log(`🔥 [DEBUG] POST /user received`);
   console.log(`🔥 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
@@ -3025,7 +4062,17 @@ app.post("/user", async (req, res) => {
   let cookiesToUse = req.body.cookies;
 
   if (!cookiesToUse || !cookiesToUse.j) {
-    const clearanceCookie = manualCookies.cf_clearance || manualCookies.s;
+    // Try to auto-get cf_clearance token if needed
+    let clearanceCookie = manualCookies.cf_clearance || manualCookies.s;
+
+    if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
+      console.log('🤖 Attempting to auto-retrieve cf_clearance token...');
+      const autoToken = await autoGetCfTokenIfNeeded();
+      if (autoToken) {
+        clearanceCookie = autoToken;
+      }
+    }
+
     if (manualCookies.j && clearanceCookie) {
       console.log(`🍪 [MANUAL] No cookies in request, using manual cookies`);
       cookiesToUse = {
@@ -3033,10 +4080,15 @@ app.post("/user", async (req, res) => {
         cf_clearance: clearanceCookie,
         s: clearanceCookie  // Include both names for compatibility
       };
-    } else {
-      console.log(`❌ [ERROR] No cookies provided and no manual cookies available`);
+    } else if (!manualCookies.j) {
+      console.log(`❌ [ERROR] No j cookie available. Please login manually first.`);
       return res.status(400).json({
-        error: "No cookies provided. Please use the extension or manual cookie input at /manual-cookies"
+        error: "No j cookie provided. Please login manually first at /manual-cookies"
+      });
+    } else {
+      console.log(`❌ [ERROR] No valid cf_clearance token available after auto-retrieval attempt`);
+      return res.status(400).json({
+        error: "No valid cf_clearance token available. Auto-retrieval failed. Please try manual input at /manual-cookies"
       });
     }
   } else {
@@ -3108,12 +4160,25 @@ app.delete("/user/:id", async (req, res) => {
 });
 
 app.get("/user/status/:id", async (req, res) => {
+  console.log("=== USER STATUS ENDPOINT CALLED ===");
+  console.log(`🔥 [DEBUG] User status endpoint called for ID: ${req.params.id}`);
   const { id } = req.params;
-  if (!users[id] || activeBrowserUsers.has(id)) return res.sendStatus(409);
+  console.log(`🔥 [DEBUG] User exists: ${!!users[id]}, Active users: ${activeBrowserUsers.has(id)}`);
+  if (!users[id]) {
+    console.log(`❌ [DEBUG] User ${id} not found`);
+    return res.status(409).json({ error: "User not found" });
+  }
+  if (activeBrowserUsers.has(id)) {
+    console.log(`❌ [DEBUG] User ${id} is already active`);
+    return res.status(409).json({ error: "User is already active" });
+  }
   activeBrowserUsers.add(id);
-  const wplacer = new WPlacer();
+  console.log(`🔥 [DEBUG] Creating WPlacer instance for user ${id}`);
+  const wplacer = new WPlacer(null, null, null, null, false, null, false, false, id);
   try {
+    console.log(`🔥 [DEBUG] Calling wplacer.login() for user ${id}`);
     const userInfo = await wplacer.login(users[id].cookies);
+    console.log(`🔥 [DEBUG] wplacer.login() completed successfully for user ${id}`);
     // If banned, return an explicit error with a distinct HTTP status code
     if (userInfo && userInfo.banned === true) {
       return res.status(423).json({ error: "❌ Account is suspended/banned." });
@@ -3318,7 +4383,8 @@ app.post("/user/:id/alliance/join", async (req, res) => {
     });
     const status = response.status | 0;
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    const text = await response.text();
+    const responseClone = response.clone();
+    const text = await responseClone.text();
     if (status >= 200 && status < 400) {
       res.status(200).json({ success: true });
       log(id, users[id].name, `Alliance join OK (uuid=${uuid}, status=${status}, type=${contentType || 'n/a'})`);
@@ -3357,7 +4423,8 @@ app.post("/user/:id/alliance/leave", async (req, res) => {
     });
     const status = response.status | 0;
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    const text = await response.text();
+    const responseClone = response.clone();
+    const text = await responseClone.text();
     if (status >= 200 && status < 300) {
       res.status(200).json({ success: true });
       log(id, users[id].name, `Alliance leave OK (status=${status}, type=${contentType || 'n/a'})`);
@@ -4470,7 +5537,7 @@ app.get("/test-proxies", async (req, res) => {
         const started = Date.now();
         let outcome = { idx: item.idx, proxy: `${item.host}:${item.port}`, ok: false, status: 0, reason: "", elapsedMs: 0 };
         try {
-          const imp = new Impit({ browser: "chrome", ignoreTlsErrors: true, proxyUrl: buildProxyUrl(item) });
+          const imp = new Impit({ browser: "chrome", ignoreTlsErrors: true, proxyUrl: buildProxyUrl(item), userId: "proxy-test" });
           try { log("SYSTEM", "wplacer", `🧪 Testing proxy #${item.idx} (${item.host}:${item.port}) target=${isMe ? '/me' : '/tile'}`); } catch (_) { }
 
           const controller = new AbortController();
@@ -4593,7 +5660,7 @@ app.get("/test-proxy", async (req, res) => {
     const started = Date.now();
     let outcome = { idx, proxy: `${p.host}:${p.port}`, ok: false, status: 0, reason: "", elapsedMs: 0 };
     try {
-      const imp = new Impit({ browser: "chrome", ignoreTlsErrors: true, proxyUrl: buildProxyUrl(p) });
+      const imp = new Impit({ browser: "chrome", ignoreTlsErrors: true, proxyUrl: buildProxyUrl(p), userId: "proxy-test" });
       try { log("SYSTEM", "wplacer", `🧪 Testing proxy #${idx} (${p.host}:${p.port}) target=${isMe ? '/me' : '/tile'}`); } catch (_) { }
       const controller = new AbortController();
       const timeoutMs = 10000;
@@ -4766,10 +5833,23 @@ app.get("/canvas", async (req, res) => {
     // Get authentication cookies from any logged-in user or manual cookies
     let authCookies = null;
     if (manualCookies.j && (manualCookies.cf_clearance || manualCookies.s)) {
-      authCookies = {
-        j: manualCookies.j,
-        cf_clearance: manualCookies.cf_clearance || manualCookies.s
-      };
+      // Check if cf_clearance token is still valid, auto-refresh if needed
+      let clearanceCookie = manualCookies.cf_clearance || manualCookies.s;
+
+      if (!(await isCfTokenValid(clearanceCookie))) {
+        console.log('🤖 [TILES] cf_clearance token invalid, attempting auto-refresh...');
+        const autoToken = await autoGetCfTokenIfNeeded();
+        if (autoToken) {
+          clearanceCookie = autoToken;
+        }
+      }
+
+      if (clearanceCookie) {
+        authCookies = {
+          j: manualCookies.j,
+          cf_clearance: clearanceCookie
+        };
+      }
     } else {
       // Try to find cookies from any logged-in user
       const userIds = Object.keys(users);
@@ -4796,7 +5876,7 @@ app.get("/canvas", async (req, res) => {
     const useProxy = !!currentSettings.proxyEnabled && loadedProxies.length > 0;
     if (useProxy) {
       // Fetch via Impit to respect proxy settings with authentication
-      const impitOptions = { browser: "chrome", ignoreTlsErrors: true };
+      const impitOptions = { browser: "chrome", ignoreTlsErrors: true, userId: "canvas-fetch" };
       const proxySel = getNextProxy();
       if (proxySel) {
         impitOptions.proxyUrl = proxySel.url;
@@ -4808,16 +5888,27 @@ app.get("/canvas", async (req, res) => {
       const resp = await imp.fetch(url, { headers });
       if (!resp.ok) {
         console.log(`🔥 [DEBUG] Canvas proxy fetch failed: ${resp.status} ${resp.statusText}`);
+        if (resp.status === 403) {
+          return res.status(403).json({ error: "Access denied by upstream server. Check authentication cookies or CF-Clearance tokens." });
+        }
         return res.sendStatus(resp.status);
       }
-      buffer = Buffer.from(await resp.arrayBuffer());
+      const respClone = resp.clone();
+      buffer = Buffer.from(await respClone.arrayBuffer());
     } else {
-      const response = await fetch(url, { headers });
+      // Используем MockImpit даже без прокси для поддержки CF-Clearance
+      const impitOptions = { browser: "chrome", ignoreTlsErrors: true, userId: "canvas-fetch" };
+      const imp = new Impit(impitOptions);
+      const response = await imp.fetch(url, { headers });
       if (!response.ok) {
         console.log(`🔥 [DEBUG] Canvas fetch failed: ${response.status} ${response.statusText}`);
+        if (response.status === 403) {
+          return res.status(403).json({ error: "Access denied by upstream server. Check authentication cookies or CF-Clearance tokens." });
+        }
         return res.sendStatus(response.status);
       }
-      buffer = Buffer.from(await response.arrayBuffer());
+      const responseClone = response.clone();
+      buffer = Buffer.from(await responseClone.arrayBuffer());
     }
 
     res.json({ image: `data:image/png;base64,${buffer.toString("base64")}` });
@@ -4836,7 +5927,7 @@ app.get("/version", async (_req, res) => {
     const local = String(pkg.version || "0.0.0");
     let latest = local;
     try {
-      const r = await fetch("https://raw.githubusercontent.com/lllexxa/wplacer/main/package.json", { cache: "no-store" });
+      const r = await fetch("https://raw.githubusercontent.com/13MrBlackCat13/bplacer/main/package.json", { cache: "no-store" });
       if (r.ok) {
         const remote = await r.json();
         latest = String(remote.version || latest);
@@ -4866,7 +5957,7 @@ app.get("/changelog", async (_req, res) => {
     try { local = readFileSync(path.join(process.cwd(), "CHANGELOG.md"), "utf8"); } catch (_) { }
     let remote = "";
     try {
-      const r = await fetch("https://raw.githubusercontent.com/lllexxa/wplacer/main/CHANGELOG.md", { cache: "no-store" });
+      const r = await fetch("https://raw.githubusercontent.com/13MrBlackCat13/bplacer/main/CHANGELOG.md", { cache: "no-store" });
       if (r.ok) remote = await r.text();
     } catch (_) { }
     res.json({ local, remote });
@@ -5024,10 +6115,10 @@ app.get('/export-tokens', (req, res) => {
 (async () => {
   console.clear();
   const version = JSON.parse(readFileSync("package.json", "utf8")).version;
-  console.log(`\n--- wplacer v${version} made by luluwaffless and jinx | forked/improved by lllexxa ---\n`);
+  console.log(`\n--- wplacer v${version} made by luluwaffless and jinx | forked/improved by lllexxa | additional improvements by 13MrBlackCat13 ---\n`);
   
   // Add startup message to Live Logs
-  addToLiveLogs(`--- wplacer v${version} made by luluwaffless and jinx | forked/improved by lllexxa ---`);
+  addToLiveLogs(`--- wplacer v${version} made by luluwaffless and jinx | forked/improved by lllexxa | additional improvements by 13MrBlackCat13 ---`);
 
   const loadedTemplates = loadJSON("templates.json");
   for (const id in loadedTemplates) {
@@ -5087,6 +6178,108 @@ app.get('/export-tokens', (req, res) => {
     addToLiveLogs(securityWarning1, 'general', 'warning');
     addToLiveLogs(securityWarning2, 'general', 'warning');
   }
+
+  // Auto token status endpoint
+  app.get("/auto-token-status", (req, res) => {
+    try {
+      const currentToken = manualCookies.cf_clearance || manualCookies.s;
+      res.json({
+        enabled: autoTokenSettings.enabled,
+        isRetrying: autoTokenSettings.isRetrying,
+        lastAttempt: autoTokenSettings.lastAttempt,
+        hasToken: !!currentToken,
+        tokenPreview: currentToken ? currentToken.substring(0, 20) + '...' : null,
+        retryDelay: autoTokenSettings.retryDelay
+      });
+    } catch (error) {
+      console.error('❌ Error getting auto token status:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // CF-Clearance Management API endpoints
+  app.get("/cf-clearance/stats", (req, res) => {
+    try {
+      const stats = cfClearanceManager.getStats();
+      res.json(stats);
+    } catch (error) {
+      console.error('❌ Error getting CF-Clearance stats:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/cf-clearance/refresh/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { proxyUrl } = req.body;
+
+      let proxyInfo = null;
+      if (proxyUrl) {
+        try {
+          const url = new URL(proxyUrl);
+          proxyInfo = {
+            protocol: url.protocol.replace(':', ''),
+            host: url.hostname,
+            port: parseInt(url.port),
+            username: decodeURIComponent(url.username || ''),
+            password: decodeURIComponent(url.password || '')
+          };
+        } catch (error) {
+          return res.status(400).json({ error: 'Invalid proxy URL format' });
+        }
+      }
+
+      const result = await cfClearanceManager.refreshClearance(proxyInfo, userId);
+      if (result) {
+        res.json({ success: true, message: 'CF-Clearance token refreshed successfully' });
+      } else {
+        res.status(500).json({ error: 'Failed to refresh CF-Clearance token' });
+      }
+    } catch (error) {
+      console.error('❌ Error refreshing CF-Clearance:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/cf-clearance/cleanup", (req, res) => {
+    try {
+      cfClearanceManager.cleanupExpiredTokens();
+      res.json({ success: true, message: 'Expired CF-Clearance tokens cleaned up' });
+    } catch (error) {
+      console.error('❌ Error cleaning up CF-Clearance tokens:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/cf-clearance/list", (req, res) => {
+    try {
+      const tokens = [];
+      for (const [key, value] of cfClearanceManager.clearanceCache.entries()) {
+        tokens.push({
+          key: key,
+          expires: value.expires,
+          expiresIn: value.expires ? Math.max(0, value.expires - Date.now()) : 0,
+          obtainedAt: value.obtainedAt,
+          userAgent: value.userAgent ? value.userAgent.substring(0, 50) + '...' : null
+        });
+      }
+      res.json({ tokens });
+    } catch (error) {
+      console.error('❌ Error listing CF-Clearance tokens:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Глобальный error handler для отладки
+  app.use((error, req, res, next) => {
+    console.error(`🔥 [ERROR] Global error handler caught:`, error.message);
+    console.error(`🔥 [ERROR] Request URL: ${req.method} ${req.url}`);
+    console.error(`🔥 [ERROR] Stack trace:`, error.stack);
+
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   const server = app.listen(port, host, () => {
     const serverMsg1 = `✅ Server listening on http://${hostname}:${port} (${host})`;

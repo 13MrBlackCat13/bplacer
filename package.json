@@ -1,8 +1,20 @@
 {
   "name": "bplacer",
   "version": "4.3.5",
+  "description": "A massively updated auto-drawing bot for bplace.org",
   "main": "server.js",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/13MrBlackCat13/bplacer.git"
+  },
+  "author": "13MrBlackCat13",
+  "contributors": [
+    "luluwaffless",
+    "JinxTheCatto",
+    "lllexxa"
+  ],
+  "license": "AGPL-3.0",
   "scripts": {
     "start": "node --env-file=.env ."
   },
@@ -11,6 +23,7 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "impit": "0.5.3",
+    "puppeteer": "^24.22.3",
     "tough-cookie": "^6.0.0"
   },
   "engines": {

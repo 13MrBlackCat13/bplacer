@@ -1,14 +1,8 @@
 <h1 align="center"><p style="display: inline-flex; align-items: center; gap: 0.25em"><img style="width: 1.5em; height: 1.5em;" src="public/icons/favicon.png">bplacer</p></h1>
 
-<a href="LICENSE"><img src="https://img.shields.io/github/license/lllexxa/bplacer"></a>
-<a href="https://discord.gg/qbtcWrHJvR"><img src="https://img.shields.io/badge/Support-gray?style=flat&logo=Discord&logoColor=white&logoSize=auto&labelColor=5562ea"></a>
-[![Views](https://hits.sh/github.com/lllexxa/bplacer.svg?label=Views&color=blue&style=flat)](https://hits.sh/github.com/lllexxa/bplacer/)
-
-> [!WARNING]  
-> 🚨 **UNSAFE — HIGH BAN RISK** 🚨  
-> Using this bot is no longer safe.  
-> There is a **high chance that all your accounts will get banned** if you use it.  
-> **Strongly recommended NOT to use.**
+<a href="LICENSE"><img src="https://img.shields.io/github/license/13MrBlackCat13/bplacer"></a>
+<a href="https://discord.gg/abds7qHTqF"><img src="https://img.shields.io/badge/Support-gray?style=flat&logo=Discord&logoColor=white&logoSize=auto&labelColor=5562ea"></a>
+[![Views](https://hits.sh/github.com/13MrBlackCat13/bplacer.svg?label=Views&color=blue&style=flat)](https://hits.sh/github.com/13MrBlackCat13/bplacer/)
 
 A massively updated auto-drawing bot for [bplace.org](https://bplace.org/).
 
@@ -52,12 +46,26 @@ A massively updated auto-drawing bot for [bplace.org](https://bplace.org/).
 
 ### Requirements:
 - [Node.js and NPM](https://nodejs.org/en/download)
+- [Python 3.x](https://www.python.org/downloads/) (for CF-Clearance Scraper)
 - [Tampermonkey](https://www.tampermonkey.net/)
 - [git](https://git-scm.com/downloads) (optional, but recommended)
+
 ### Installation:
 1. Install the extension on each browser window with an account you want to be used by bplacer and to automatically solve Turnstiles (CAPTCHAs) by going to the extensions page of your browser, turning on developer mode, pressing load unpacked, and then selecting the LOAD_UNPACKED folder included with bplacer.
-2. Download the repository using [git](https://git-scm.com/downloads) (`git clone https://github.com/lllexxa/bplacer.git`) or download the ZIP directly from GitHub (not recommended).
+2. Download the repository using [git](https://git-scm.com/downloads) (`git clone https://github.com/13MrBlackCat13/bplacer.git`) or download the ZIP directly from GitHub (not recommended).
 3. In the terminal, navigate to the project directory and install the dependencies with `npm i`.
+4. **CF-Clearance Scraper Setup** (for automatic Cloudflare bypass):
+   - Clone the CF-Clearance-Scraper repository into the bplacer directory:
+     ```bash
+     git clone https://github.com/vinyzu/cf-clearance-scraper.git CF-Clearance-Scraper
+     ```
+   - Install Python dependencies:
+     ```bash
+     cd CF-Clearance-Scraper
+     pip install -r requirements.txt
+     cd ..
+     ```
+   - The scraper will now automatically obtain fresh CF-Clearance tokens when needed
 - If you'd like, you can change the host and port of the local server by creating a `.env` file.
 ### Usage:
 1. To start the bot, run `npm start` in the terminal.
@@ -70,6 +78,21 @@ A massively updated auto-drawing bot for [bplace.org](https://bplace.org/).
    - The script will occasionally refresh one of the active bot windows on [bplace.org](https://bplace.org/). This is required to refresh the Turnstile token needed for painting.
 
 
+## Troubleshooting 🔧
+
+### CF-Clearance Issues
+If you encounter Cloudflare-related errors:
+
+1. **403 Forbidden errors**: The CF-Clearance scraper will automatically attempt to get fresh tokens
+2. **"CF-Clearance-Scraper main.py not found"**: Make sure you've cloned the scraper into the correct directory
+3. **Python errors**: Ensure Python 3.x is installed and all dependencies are installed with `pip install -r requirements.txt`
+4. **Manual override**: You can manually set cookies via the web UI at `/manual-cookies` if automatic scraping fails
+
+### Common Error Messages
+- `"Body has already been read"`: This has been fixed in recent versions
+- `409 Conflict`: Usually indicates the user is already active or doesn't exist
+- `403 Forbidden on /canvas`: Check CF-Clearance tokens or authentication cookies
+
 ## Notes 📝
 
 > [!CAUTION]
@@ -80,10 +103,11 @@ A massively updated auto-drawing bot for [bplace.org](https://bplace.org/).
 -   [luluwaffless](https://github.com/luluwaffless)
 -   [Jinx](https://github.com/JinxTheCatto)
 -   Fork maintainer: [lllexxa](https://github.com/lllexxa)
+-   Additional improvements: [13MrBlackCat13](https://github.com/13MrBlackCat13)
 
-### Original bplacer repository
+### Repository
 
-https://github.com/bplacer/bplacer
+Current repository: https://github.com/13MrBlackCat13/bplacer
 
 ### License 📜
 
