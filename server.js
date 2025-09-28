@@ -3554,6 +3554,88 @@ app.post("/install-cf-scraper", async (req, res) => {
 });
 
 
+// Test endpoint with automatic token generation and user JWT selection
+app.get("/test-bplace", async (req, res) => {
+  console.log(`🔥 [TEST] Testing direct request to bplace.org`);
+
+  try {
+    // Get first available user's JWT token
+    const userIds = Object.keys(users);
+    if (userIds.length === 0) {
+      return res.status(400).json({
+        error: "No users configured. Please add users first."
+      });
+    }
+
+    const firstUser = users[userIds[0]];
+    if (!firstUser.cookies || !firstUser.cookies.j) {
+      return res.status(400).json({
+        error: "First user has no JWT token. Please ensure user has valid cookies."
+      });
+    }
+
+    console.log(`🔥 [TEST] Using JWT from user ${userIds[0]} (${firstUser.name || 'unnamed'})`);
+
+    // Get or generate cf_clearance token automatically
+    let cfClearanceToken = manualCookies.cf_clearance;
+
+    if (!cfClearanceToken) {
+      console.log(`🔥 [TEST] No cf_clearance found, generating automatically...`);
+      cfClearanceToken = await getCloudflareToken();
+
+      if (!cfClearanceToken) {
+        return res.status(500).json({
+          error: "Failed to generate cf_clearance token automatically"
+        });
+      }
+      console.log(`🔥 [TEST] Generated cf_clearance: ${cfClearanceToken.substring(0, 50)}...`);
+    }
+
+    const cookies = {
+      j: firstUser.cookies.j,
+      cf_clearance: cfClearanceToken
+    };
+
+    const cookieHeader = Object.keys(cookies).map(key => `${key}=${cookies[key]}`).join('; ');
+    console.log(`🔥 [TEST] Cookie header length: ${cookieHeader.length}`);
+
+    const response = await fetch("https://bplace.org/me", {
+      headers: {
+        "Accept": "application/json",
+        "Accept-Encoding": "identity",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": cookieHeader
+      }
+    });
+
+    console.log(`🔥 [TEST] Response status: ${response.status}`);
+
+    // Try decompression
+    let text;
+    try {
+      const responseClone = response.clone();
+      text = await decompressResponse(responseClone);
+      console.log(`🔥 [TEST] Decompressed successfully`);
+    } catch (error) {
+      console.log(`🔥 [TEST] Decompression failed: ${error.message}`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      text = buffer.toString('utf8');
+    }
+
+    res.json({
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      textLength: text.length,
+      textPreview: text.substring(0, 200),
+      userUsed: `${userIds[0]} (${firstUser.name || 'unnamed'})`,
+      cfClearanceGenerated: !manualCookies.cf_clearance
+    });
+
+  } catch (error) {
+    console.error(`🔥 [TEST] Error:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // --- API: users ---
 const getJwtExp = (j) => {
