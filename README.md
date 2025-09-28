@@ -57,7 +57,7 @@ A massively updated auto-drawing bot for [bplace.org](https://bplace.org/).
 4. **CF-Clearance Scraper Setup** (for automatic Cloudflare bypass):
    - Clone the CF-Clearance-Scraper repository into the bplacer directory:
      ```bash
-     git clone https://github.com/vinyzu/cf-clearance-scraper.git CF-Clearance-Scraper
+     git clone https://github.com/Xewdy444/CF-Clearance-Scraper CF-Clearance-Scraper
      ```
    - Install Python dependencies:
      ```bash
