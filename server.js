@@ -815,7 +815,6 @@ class WPlacer {
       "Sec-Fetch-Site": "same-origin",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
     };
-    if (this.pawtect) headers["x-pawtect-token"] = this.pawtect;
 
     // Детальное логирование запроса
     console.log(`🔥 [DEBUG] POST Request to: ${url}`);
@@ -1932,81 +1931,6 @@ const notifyTokenNeeded = () => {
   longWaiters.clear();
 };
 
-const TokenManager = {
-  tokenQueue: [],
-  tokenPromise: null,
-  resolvePromise: null,
-  isTokenNeeded: false,
-  TOKEN_EXPIRATION_MS: 2 * 60 * 1000,
-  _lastNeededAt: 0,
-
-  _purgeExpiredTokens() {
-    const now = Date.now();
-    let changed = false;
-    const filtered = [];
-    for (const item of this.tokenQueue) {
-      if (item && typeof item === 'object' && item.token) {
-        if (now - item.receivedAt < this.TOKEN_EXPIRATION_MS) filtered.push(item);
-        else changed = true;
-      } else {
-        // backward compatibility: plain string token — keep but wrap
-        filtered.push({ token: String(item), receivedAt: now });
-        changed = true;
-      }
-    }
-    if (changed) this.tokenQueue = filtered;
-  },
-
-  getToken() {
-    this._purgeExpiredTokens();
-    if (this.tokenQueue.length > 0) {
-      const head = this.tokenQueue[0];
-      return Promise.resolve(head && head.token ? head.token : head);
-    }
-    if (!this.tokenPromise) {
-      log("SYSTEM", "wplacer", "🛡️ TOKEN_MANAGER: A task is waiting for a token. Flagging for clients.");
-      this.isTokenNeeded = true;
-      this._lastNeededAt = Date.now();
-      notifyTokenNeeded();
-      this.tokenPromise = new Promise((resolve) => {
-        this.resolvePromise = resolve;
-      });
-    }
-    return this.tokenPromise;
-  },
-  setToken(t) {
-    log("SYSTEM", "wplacer", `🛡️ TOKEN_MANAGER: Token received. Queue size: ${this.tokenQueue.length + 1}`);
-    this.isTokenNeeded = false;
-    this.tokenQueue.push({ token: t, receivedAt: Date.now() });
-    if (this.resolvePromise) {
-      const head = this.tokenQueue[0];
-      this.resolvePromise(head && head.token ? head.token : head);
-      this.tokenPromise = null;
-      this.resolvePromise = null;
-    }
-  },
-  invalidateToken() {
-    this.tokenQueue.shift();
-    log("SYSTEM", "wplacer", `🛡️ TOKEN_MANAGER: Invalidating token. ${this.tokenQueue.length} tokens remaining.`);
-
-    if (this.tokenQueue.length === 0) {
-      this.isTokenNeeded = true;
-      this._lastNeededAt = Date.now();
-      notifyTokenNeeded();
-    }
-  },
-  consumeToken() {
-    if (this.tokenQueue.length > 0) {
-      this.tokenQueue.shift();
-      log("SYSTEM", "wplacer", `🛡️ TOKEN_MANAGER: Consumed token after success. ${this.tokenQueue.length} tokens remaining.`);
-    }
-    if (this.tokenQueue.length === 0) {
-      this.isTokenNeeded = true;
-      this._lastNeededAt = Date.now();
-      notifyTokenNeeded();
-    }
-  }
-};
 
 // --- Error logging wrapper ---
 function logUserError(error, id, name, context) {
@@ -2268,9 +2192,10 @@ class TemplateManager {
   async _performPaintTurn(wplacer) {
     while (this.running) {
       try {
-        wplacer.token = await TokenManager.getToken();
-        // Pull latest pawtect token, if any
-        try { wplacer.pawtect = globalThis.__wplacer_last_pawtect || null; } catch { }
+        // No token needed for new bplace.org - only CF-Clearance and JWT
+        wplacer.token = null;
+        wplacer.pawtect = null;
+
         const painted = await wplacer.paint(currentSettings.drawingMethod);
         if(typeof painted === 'number' && painted > 0)
         {
@@ -2279,7 +2204,6 @@ class TemplateManager {
         // save back burst seeds if used
         this.burstSeeds = wplacer._burstSeeds ? wplacer._burstSeeds.map((s) => ({ gx: s.gx, gy: s.gy })) : null;
         saveTemplates();
-        try { TokenManager.consumeToken(); } catch { }
         return painted;
       } catch (error) {
         if (error.name === "SuspensionError") {
@@ -2296,20 +2220,16 @@ class TemplateManager {
           try { saveTemplates(); } catch (_) { }
           // log informative message in English
           log(uid, uname, `[${this.name}] 🛑 Account suspended until ${suspendedUntilDate}. Removed from the template list.`);
-          // also invalidate the currently held token so it won't be reused
-          try { TokenManager.invalidateToken(); } catch (_) { }
           return; // end this user's turn
         }
         if (error.message === "REFRESH_TOKEN") {
-          log(wplacer.userInfo.id, wplacer.userInfo.name, `[${this.name}] 🔄 Token expired/invalid. Trying next token...`);
-          TokenManager.invalidateToken();
+          log(wplacer.userInfo.id, wplacer.userInfo.name, `[${this.name}] 🔄 Token expired/invalid. Retrying...`);
           await sleep(1000);
           continue;
         }
         // Delegate all errors to unified logger to keep original reason
         logUserError(error, wplacer.userInfo.id, wplacer.userInfo.name, `[${this.name}] paint turn`);
         return 0;
-        throw error;
       }
     }
   }
@@ -2777,30 +2697,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// --- API: tokens ---
-app.get("/token-needed/long", (req, res) => {
-  res.setHeader("Content-Type", "application/json");
-  let done = false;
-  const finish = (needed) => { if (done) return; done = true; res.end(JSON.stringify({ needed })); };
-  const timer = setTimeout(() => finish(false), 60000);
-  const fn = () => { clearTimeout(timer); finish(true); };
-  longWaiters.add(fn);
-  req.on("close", () => { longWaiters.delete(fn); clearTimeout(timer); });
-  if (TokenManager.isTokenNeeded) fn();
-});
-app.get("/token-needed", (req, res) => {
-  res.json({ needed: TokenManager.isTokenNeeded });
-});
-app.post("/t", (req, res) => {
-  const { t, pawtect, fp } = req.body || {};
-  if (!t) return res.sendStatus(400);
-  TokenManager.setToken(t);
-  try {
-    if (pawtect && typeof pawtect === "string") globalThis.__wplacer_last_pawtect = pawtect;
-    if (fp && typeof fp === "string") globalThis.__wplacer_last_fp = fp;
-  } catch { }
-  res.sendStatus(200);
-});
 
 // Global storage for manual cookies
 let manualCookies = {
