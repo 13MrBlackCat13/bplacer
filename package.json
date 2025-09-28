@@ -23,7 +23,6 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "impit": "0.5.3",
-    "puppeteer": "^24.22.3",
     "tough-cookie": "^6.0.0"
   },
   "engines": {

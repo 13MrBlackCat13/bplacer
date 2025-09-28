@@ -10,7 +10,6 @@ import { gunzip, inflate, brotliDecompress } from "node:zlib";
 import { promisify } from "node:util";
 // import { Impit } from "impit";  // Временно отключено
 import { Image, createCanvas, loadImage } from "canvas";
-import puppeteer from "puppeteer";
 import CFClearanceManager from "./cf-clearance-manager.js";
 
 // Временная замена для Impit с использованием fetch с поддержкой CF-Clearance
@@ -2938,310 +2937,29 @@ console.log(`  - Enabled: ${autoTokenSettings.enabled}`);
 console.log(`  - Retry delay: ${autoTokenSettings.retryDelay / 1000}s`);
 console.log(`  - Periodic check: every 10 minutes`);
 
-// Function to automatically install CloudFreed extension and get cf_clearance token
-async function autoInstallCloudFreedExtension() {
-  console.log('🔧 Автоматическая установка CloudFreed расширения в Chrome...');
+
+
+
+// CF-Clearance token retrieval using only CF-Clearance-Scraper
+async function getCloudflareToken() {
+  console.log('🔄 Starting cf_clearance token retrieval with CF-Clearance-Scraper...');
 
   try {
-    // Check if extension folder exists
-    const extensionPath = path.resolve('./CloudFreed_Extension/CloudFreed_Extension_v1.0.1');
+    // Use CF-Clearance Manager for token retrieval
+    const clearanceData = await cfClearanceManager.getClearance(null, null, 'https://bplace.org');
 
-    // Create extension folder if it doesn't exist
-    if (!fs.existsSync(extensionPath)) {
-      console.log('📁 Creating CloudFreed extension directory...');
-      fs.mkdirSync(extensionPath, { recursive: true });
-
-      // Create a basic CloudFreed extension structure
-      const manifestContent = await fs.readFileSync('./CloudFreed_Extension/CloudFreed_Extension_v1.0.1/manifest.json', 'utf8');
-      console.log('✅ CloudFreed extension directory prepared');
-    }
-
-    console.log('🚀 Launching Chrome with CloudFreed extension auto-install...');
-
-    // Use Puppeteer to open Chrome and install the extension programmatically
-    const browser = await puppeteer.launch({
-      headless: false,
-      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-extensions-except=' + extensionPath,
-        '--load-extension=' + extensionPath,
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-        '--window-size=1280,720'
-      ],
-      defaultViewport: null,
-      userDataDir: './chrome-user-data',
-    });
-
-    const pages = await browser.pages();
-    const page = pages[0];
-
-    // Navigate to chrome://extensions/ to verify extension installation
-    console.log('🔍 Checking extension installation...');
-    await page.goto('chrome://extensions/', { waitUntil: 'networkidle0' });
-
-    // Wait for extensions page to load
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Check if CloudFreed is installed
-    const isExtensionLoaded = await page.evaluate(() => {
-      const extensionCards = document.querySelectorAll('extensions-item');
-      for (let card of extensionCards) {
-        const name = card.shadowRoot?.querySelector('#name')?.textContent || '';
-        if (name.includes('CloudFreed') || name.includes('cloudfreed')) {
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (isExtensionLoaded) {
-      console.log('✅ CloudFreed extension successfully loaded!');
+    if (clearanceData && clearanceData.cf_clearance) {
+      console.log('✅ CF-Clearance token retrieved successfully!');
+      manualCookies.cf_clearance = clearanceData.cf_clearance;
+      return clearanceData.cf_clearance;
     } else {
-      console.log('⚠️ CloudFreed extension not detected, but continuing...');
-    }
-
-    // Return browser and page for further use
-    return { browser, page };
-
-  } catch (error) {
-    console.error('❌ Error auto-installing CloudFreed extension:', error.message);
-    throw error;
-  }
-}
-
-// Function to automatically get cf_clearance token using CF-Clearance-Scraper
-async function getCloudflareTokenWithScraper() {
-  console.log('🔄 Starting automatic cf_clearance token retrieval with CF-Clearance-Scraper...');
-
-  try {
-    const { spawn } = require('child_process');
-    const fs = require('fs').promises;
-    const path = require('path');
-
-    // Create temp file for cookies
-    const tempCookieFile = path.join(__dirname, 'temp_cf_cookies.json');
-
-    // User agent to match our requests
-    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
-
-    console.log('🐍 Running CF-Clearance-Scraper...');
-
-    return new Promise((resolve, reject) => {
-      // Check if CF-Clearance-Scraper directory exists
-      const scraperPath = path.join(__dirname, 'cf-clearance-scraper');
-
-      const args = [
-        'main.py',
-        '-f', tempCookieFile,
-        '-ua', userAgent,
-        '-t', '60', // 60 second timeout
-        '--headed', // Run in headed mode for better success rate
-        'https://bplace.org/'
-      ];
-
-      console.log(`🔧 Command: python ${args.join(' ')}`);
-
-      const process = spawn('python', args, {
-        cwd: scraperPath,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      process.stdout.on('data', (data) => {
-        const output = data.toString();
-        stdout += output;
-        console.log('📝 [CF-Scraper]:', output.trim());
-      });
-
-      process.stderr.on('data', (data) => {
-        const output = data.toString();
-        stderr += output;
-        console.log('⚠️ [CF-Scraper Error]:', output.trim());
-      });
-
-      process.on('close', async (code) => {
-        console.log(`🏁 CF-Clearance-Scraper exited with code ${code}`);
-
-        if (code === 0) {
-          try {
-            // Read the generated cookie file
-            const cookieData = await fs.readFile(tempCookieFile, 'utf8');
-            const cookieInfo = JSON.parse(cookieData);
-
-            console.log('🍪 Cookie data received:', Object.keys(cookieInfo));
-
-            if (cookieInfo.cf_clearance) {
-              console.log('✅ cf_clearance token retrieved successfully!');
-              console.log(`🔑 Token: ${cookieInfo.cf_clearance.substring(0, 50)}...`);
-              console.log(`👤 User Agent: ${cookieInfo.user_agent || userAgent}`);
-
-              // Save token to manual cookies
-              manualCookies.cf_clearance = cookieInfo.cf_clearance;
-
-              // Clean up temp file
-              try {
-                await fs.unlink(tempCookieFile);
-              } catch (e) {
-                console.log('⚠️ Could not delete temp file:', e.message);
-              }
-
-              resolve(cookieInfo.cf_clearance);
-            } else {
-              console.log('❌ cf_clearance token not found in scraper output');
-              resolve(null);
-            }
-          } catch (error) {
-            console.error('❌ Error reading cookie file:', error.message);
-            resolve(null);
-          }
-        } else {
-          console.error('❌ CF-Clearance-Scraper failed with exit code:', code);
-          console.error('❌ stderr:', stderr);
-          resolve(null);
-        }
-      });
-
-      process.on('error', (error) => {
-        console.error('❌ Error starting CF-Clearance-Scraper:', error.message);
-        reject(error);
-      });
-
-      // Kill process after 120 seconds if still running
-      setTimeout(() => {
-        if (!process.killed) {
-          console.log('⏰ CF-Clearance-Scraper timeout, killing process...');
-          process.kill('SIGTERM');
-          resolve(null);
-        }
-      }, 120000);
-    });
-
-  } catch (error) {
-    console.error('❌ Error in CF-Clearance-Scraper integration:', error.message);
-    return null;
-  }
-}
-
-// Legacy CloudFreed function (kept for fallback)
-async function getCloudflareTokenWithCloudFreed() {
-  console.log('🔄 Starting cf_clearance token retrieval with CloudFreed extension (fallback)...');
-
-  try {
-    // First, auto-install the CloudFreed extension
-    const { browser, page } = await autoInstallCloudFreedExtension();
-    console.log('🔧 CloudFreed extension installation completed');
-
-    // Set user agent
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-    // Navigate to bplace.org
-    console.log('🌐 Navigating to bplace.org...');
-    await page.goto('https://bplace.org', {
-      waitUntil: 'networkidle0',
-      timeout: 60000
-    });
-
-    console.log('🤖 CloudFreed extension should automatically solve Cloudflare challenge...');
-
-    // Wait for CloudFreed to solve the challenge
-    console.log('⏳ Waiting for CloudFreed to solve challenge...');
-
-    // Wait and check for challenge completion
-    let retries = 0;
-    const maxRetries = 60; // 60 * 2 = 120 seconds maximum wait
-
-    while (retries < maxRetries) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      try {
-        const isChallengePage = await page.evaluate(() => {
-          const bodyText = document.body ? document.body.innerText : '';
-          const title = document.title || '';
-          return bodyText.includes('Checking your browser') ||
-                 bodyText.includes('Just a moment') ||
-                 bodyText.includes('Verifying you are human') ||
-                 bodyText.includes('Please wait') ||
-                 title.includes('cloudflare') ||
-                 title.includes('Just a moment');
-        });
-
-        if (!isChallengePage) {
-          console.log('✅ Challenge appears to be solved!');
-          break;
-        }
-
-        retries++;
-        console.log(`🔄 Still solving challenge... (${retries}/${maxRetries})`);
-      } catch (error) {
-        console.log(`⚠️ Error checking challenge status: ${error.message}`);
-        retries++;
-      }
-    }
-
-    // Wait additional time for cookies to be set
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Get cookies after challenge completion
-    const cookies = await page.cookies();
-    console.log('🍪 Retrieved cookies:', cookies.map(c => `${c.name}=${c.value.substring(0, 20)}...`));
-
-    // Find cf_clearance cookie
-    const cfClearance = cookies.find(cookie => cookie.name === 'cf_clearance');
-
-    if (cfClearance) {
-      console.log('✅ cf_clearance token retrieved successfully!');
-      console.log(`🔑 Token: ${cfClearance.value.substring(0, 50)}...`);
-      manualCookies.cf_clearance = cfClearance.value;
-
-      // Close browser after successful token retrieval
-      await browser.close();
-      return cfClearance.value;
-    } else {
-      console.log('❌ cf_clearance token not found in cookies');
-      console.log('Available cookies:', cookies.map(c => c.name));
-
-      // Keep browser open for manual inspection if token not found
-      console.log('🔍 Browser kept open for manual inspection');
+      console.log('❌ Failed to retrieve CF-Clearance token');
       return null;
     }
-
   } catch (error) {
-    console.error('❌ Error getting cf_clearance token:', error.message);
+    console.error('❌ Error in CF-Clearance token retrieval:', error.message);
     return null;
   }
-}
-
-// Main function that tries CF-Clearance-Scraper first, falls back to CloudFreed
-async function getCloudflareToken() {
-  console.log('🔄 Starting cf_clearance token retrieval...');
-
-  // Try CF-Clearance-Scraper first
-  console.log('🥇 Attempting with CF-Clearance-Scraper...');
-  const scraperToken = await getCloudflareTokenWithScraper();
-
-  if (scraperToken) {
-    console.log('✅ CF-Clearance-Scraper succeeded!');
-    return scraperToken;
-  }
-
-  // Fallback to CloudFreed if scraper fails
-  console.log('🥈 CF-Clearance-Scraper failed, falling back to CloudFreed...');
-  const cloudfreedToken = await getCloudflareTokenWithCloudFreed();
-
-  if (cloudfreedToken) {
-    console.log('✅ CloudFreed fallback succeeded!');
-    return cloudfreedToken;
-  }
-
-  console.log('❌ Both CF-Clearance-Scraper and CloudFreed failed');
-  return null;
 }
 
 // Manual cookie input web interface
