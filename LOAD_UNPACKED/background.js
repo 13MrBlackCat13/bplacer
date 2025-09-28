@@ -304,6 +304,20 @@ const sendCookie = async (callback) => {
 
     console.log("wplacer: Looking for cookies on bplace.org...");
 
+    // Check server for auto-updated cf_clearance token
+    try {
+        const statusUrl = await getServerUrl("/auto-token-status");
+        const statusResponse = await fetch(statusUrl);
+        if (statusResponse.ok) {
+            const status = await statusResponse.json();
+            if (status.hasToken && status.enabled) {
+                console.log("wplacer: Server has auto-updated cf_clearance token available");
+            }
+        }
+    } catch (error) {
+        console.log("wplacer: Could not check server auto-token status:", error.message);
+    }
+
     const [jCookie, cfClearanceCookie] = await Promise.all([
         getCookie({ url: "https://bplace.org", name: "j" }),
         getCookie({ url: "https://bplace.org", name: "cf_clearance" })
