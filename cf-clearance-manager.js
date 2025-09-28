@@ -251,6 +251,36 @@ class CFClearanceManager {
     }
   }
 
+  // Очистка устаревших токенов
+  cleanExpiredTokens() {
+    let removedCount = 0;
+    const now = Date.now();
+
+    for (const [key, value] of this.clearanceCache.entries()) {
+      if (value.expires && now >= value.expires) {
+        this.clearanceCache.delete(key);
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      console.log(`🗑️ [CF-Manager] Removed ${removedCount} expired cf_clearance tokens`);
+      this.saveCache();
+    }
+
+    return removedCount;
+  }
+
+  // Запуск периодической очистки
+  startPeriodicCleanup() {
+    // Очищаем каждые 30 минут
+    setInterval(() => {
+      this.cleanExpiredTokens();
+    }, 30 * 60 * 1000);
+
+    console.log(`🧹 [CF-Manager] Started periodic cleanup of expired tokens (every 30 minutes)`);
+  }
+
   // Получить статистику по токенам
   getStats() {
     const total = this.clearanceCache.size;

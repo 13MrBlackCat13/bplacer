@@ -109,6 +109,25 @@ If you encounter Cloudflare-related errors:
 
 Current repository: https://github.com/13MrBlackCat13/bplacer
 
+## TODO 📋
+
+### Completed ✅
+- ✅ **New Color Support**: Added support for all 96 bplace.org colors (ID 0-95)
+  - Extended palette from 63 to 96 colors including duplicated Light Red and Salmon
+  - Fixed color ID mapping system for accurate color representation
+  - Updated frontend palette display to show complete color range
+
+- ✅ **Color Detection System**: Implemented accurate premium color ownership detection
+  - Fixed bitmap interpretation using bplace.org frontend logic (bit position = colorId - 32)
+  - Added BigInt support for large bitmap values to prevent precision loss
+  - Resolved hex string parsing issues for values starting with letters (e.g., "e000000000000803")
+
+- ✅ **Color Purchase System**: Enhanced premium color purchasing functionality
+  - Extended purchase range from colors 32-63 to 32-95
+  - Fixed BigInt conversion errors in purchase validation
+  - Added proper hex string handling with automatic 0x prefix detection
+  - Improved error handling and debugging for purchase operations
+
 ### License 📜
 
 [GNU AGPL v3](LICENSE)

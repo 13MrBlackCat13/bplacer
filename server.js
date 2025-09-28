@@ -93,12 +93,8 @@ class MockImpit {
       const response = await fetch(url, options);
       console.log(`🔥 [MockImpit] Fetch completed, status: ${response.status}`);
 
-      // Временно отключаем проверку Cloudflare для диагностики Body issues
-      // TODO: Включить обратно после устранения проблемы
-      console.log(`🔥 [MockImpit] Cloudflare check disabled for debugging`);
-
-      /* Закомментированный код проверки Cloudflare
-      if (needsCfClearance && (response.status === 403 || response.status === 503)) {
+      // Проверяем Cloudflare challenge при 403/502/503 ошибках
+      if (needsCfClearance && (response.status === 403 || response.status === 502 || response.status === 503)) {
         try {
           console.log(`🔥 [MockImpit] Checking for Cloudflare challenge...`);
           // Клонируем response чтобы не сделать body unusable
@@ -106,16 +102,29 @@ class MockImpit {
           console.log(`🔥 [MockImpit] Response cloned, reading text...`);
           const responseText = await responseClone.text();
           console.log(`🔥 [MockImpit] Response text read, length: ${responseText.length}`);
-          if (responseText.includes('cloudflare') || responseText.includes('Cloudflare')) {
+
+          if (responseText.includes('cloudflare') || responseText.includes('Cloudflare') ||
+              responseText.includes('Just a moment') || responseText.includes('Checking your browser')) {
             console.log(`🚫 [CF] Cloudflare challenge detected, refreshing cf_clearance`);
 
-            // Принудительно обновляем токен
+            // Удаляем недействительный токен из кэша
+            let proxyInfo = null;
+            if (this.proxyUrl) {
+              proxyInfo = this.parseProxyUrl(this.proxyUrl);
+            }
+
+            // Удаляем старый токен
+            const key = cfClearanceManager.generateCacheKey(proxyInfo, this.userId);
+            cfClearanceManager.clearanceCache.delete(key);
+            console.log(`🗑️ [CF] Removed invalid cf_clearance token for ${key}`);
+
+            // Принудительно получаем новый токен
             try {
-              let proxyInfo = null;
-              if (this.proxyUrl) {
-                proxyInfo = this.parseProxyUrl(this.proxyUrl);
+              const newClearanceData = await cfClearanceManager.getClearance(proxyInfo, this.userId, url);
+              if (newClearanceData) {
+                console.log(`✅ [CF] Successfully obtained new cf_clearance token`);
+                // Можно попробовать повторить запрос с новым токеном, но пока просто логируем
               }
-              await cfClearanceManager.refreshClearance(proxyInfo, this.userId, url);
             } catch (refreshError) {
               console.log(`❌ [CF] Failed to refresh cf_clearance: ${refreshError.message}`);
             }
@@ -124,7 +133,6 @@ class MockImpit {
           console.log(`⚠️ [CF] Could not check response for Cloudflare: ${cloneError.message}`);
         }
       }
-      */
 
       console.log(`🔥 [MockImpit] Returning response object`);
       return response;
@@ -258,6 +266,12 @@ if (!existsSync(heatMapsDir)) {
 // CF-Clearance Manager
 const cfClearanceManager = new CFClearanceManager(dataDir);
 
+// Запускаем периодическую очистку устаревших токенов
+cfClearanceManager.startPeriodicCleanup();
+
+// Очищаем устаревшие токены при запуске
+cfClearanceManager.cleanExpiredTokens();
+
 // Backups directories
 const backupsRootDir = path.join(dataDir, "backups");
 const usersBackupsDir = path.join(backupsRootDir, "users");
@@ -380,9 +394,105 @@ const duration = (durationMs) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// --- Colors / Palette (same as both versions) ---
-const basic_colors = { "0,0,0": 1, "60,60,60": 2, "120,120,120": 3, "210,210,210": 4, "255,255,255": 5, "96,0,24": 6, "237,28,36": 7, "255,127,39": 8, "246,170,9": 9, "249,221,59": 10, "255,250,188": 11, "14,185,104": 12, "19,230,123": 13, "135,255,94": 14, "12,129,110": 15, "16,174,166": 16, "19,225,190": 17, "40,80,158": 18, "64,147,228": 19, "96,247,242": 20, "107,80,246": 21, "153,177,251": 22, "120,12,153": 23, "170,56,185": 24, "224,159,249": 25, "203,0,122": 26, "236,31,128": 27, "243,141,169": 28, "104,70,52": 29, "149,104,42": 30, "248,178,119": 31 };
-const premium_colors = { "170,170,170": 32, "165,14,30": 33, "250,128,114": 34, "228,92,26": 35, "214,181,148": 36, "156,132,49": 37, "197,173,49": 38, "232,212,95": 39, "74,107,58": 40, "90,148,74": 41, "132,197,115": 42, "15,121,159": 43, "187,250,242": 44, "125,199,255": 45, "77,49,184": 46, "74,66,132": 47, "122,113,196": 48, "181,174,241": 49, "219,164,99": 50, "209,128,81": 51, "255,197,165": 52, "155,82,73": 53, "209,128,120": 54, "250,182,164": 55, "123,99,82": 56, "156,132,107": 57, "51,57,65": 58, "109,117,141": 59, "179,185,209": 60, "109,100,63": 61, "148,140,107": 62, "205,197,158": 63 };
+// --- Complete Colors / Palette from bplace.org (95 colors) ---
+const MASTER_PALETTE = [
+  // ID 1-31: Free colors (exactly matching bplace.org)
+  [0,0,0],[60,60,60],[120,120,120],[210,210,210],[255,255,255],
+  [96,0,24],[237,28,36],[255,127,39],[246,170,9],[249,221,59],[255,250,188],
+  [14,185,104],[19,230,123],[135,255,94],[12,129,110],[16,174,166],[19,225,190],
+  [40,80,158],[64,147,228],[96,247,242],[107,80,246],[153,177,251],
+  [120,12,153],[170,56,185],[224,159,249],[203,0,122],[236,31,128],[243,141,169],
+  [104,70,52],[149,104,42],[248,178,119],
+  // ID 32-95: Paid colors (exactly matching bplace.org)
+  [170,170,170],[165,14,30],[250,128,114],[228,92,26],[214,181,148],[156,132,49],
+  [197,173,49],[232,212,95],[74,107,58],[90,148,74],[132,197,115],[15,121,159],
+  [187,250,242],[125,199,255],[77,49,184],[74,66,132],[122,113,196],[181,174,241],
+  [219,164,99],[209,128,81],[255,197,165],[155,82,73],[209,128,120],[250,182,164],
+  [123,99,82],[156,132,107],[51,57,65],[109,117,141],[179,185,209],[109,100,63],
+  [148,140,107],[205,197,158],[102,204,255],[91,191,185],[128,0,0],[220,20,60],
+  [255,127,80],[240,230,140],[255,219,88],[127,255,0],[191,255,0],
+  [46,139,87],[64,224,208],[0,255,255],[135,206,235],[65,105,225],[0,0,128],
+  [230,230,250],[255,0,255],[255,119,255],[255,255,240],[189,252,201],[255,102,204],
+  [146,73,0],[128,0,32],[255,191,0],[107,142,35],[204,204,255],[42,82,190],
+  [64,130,109],[224,176,255],[112,66,20],[0,0,144]
+];
+
+// Complete color name mapping for all 95 colors
+const colorNames = {
+  // Free colors (1-31)
+  "0,0,0": "Black", "60,60,60": "Dark Gray", "120,120,120": "Gray", "210,210,210": "Light Gray", "255,255,255": "White",
+  "96,0,24": "Deep Red", "237,28,36": "Red", "255,127,39": "Orange", "246,170,9": "Gold", "249,221,59": "Yellow", "255,250,188": "Light Yellow",
+  "14,185,104": "Dark Green", "19,230,123": "Green", "135,255,94": "Light Green", "12,129,110": "Dark Teal", "16,174,166": "Teal", "19,225,190": "Light Teal",
+  "40,80,158": "Dark Blue", "64,147,228": "Blue", "96,247,242": "Cyan", "107,80,246": "Indigo", "153,177,251": "Light Indigo",
+  "120,12,153": "Dark Purple", "170,56,185": "Purple", "224,159,249": "Light Purple", "203,0,122": "Dark Pink", "236,31,128": "Pink", "243,141,169": "Light Pink",
+  "104,70,52": "Dark Brown", "149,104,42": "Brown", "248,178,119": "Beige",
+  // Paid colors (32-95)
+  "170,170,170": "Medium Gray", "165,14,30": "Dark Red", "250,128,114": "Light Red", "228,92,26": "Dark Orange", "214,181,148": "Light Tan", "156,132,49": "Dark Goldenrod",
+  "197,173,49": "Goldenrod", "232,212,95": "Light Goldenrod", "74,107,58": "Dark Olive", "90,148,74": "Olive", "132,197,115": "Light Olive", "15,121,159": "Dark Cyan",
+  "187,250,242": "Light Cyan", "125,199,255": "Light Blue", "77,49,184": "Dark Indigo", "74,66,132": "Dark Slate Blue", "122,113,196": "Slate Blue", "181,174,241": "Light Slate Blue",
+  "219,164,99": "Light Brown", "209,128,81": "Dark Beige", "255,197,165": "Light Beige", "155,82,73": "Dark Peach", "209,128,120": "Peach", "250,182,164": "Light Peach",
+  "123,99,82": "Dark Tan", "156,132,107": "Tan", "51,57,65": "Dark Slate", "109,117,141": "Slate", "179,185,209": "Light Slate", "109,100,63": "Dark Stone",
+  "148,140,107": "Stone", "205,197,158": "Light Stone", "102,204,255": "#66CCFF", "91,191,185": "Aquamarine", "128,0,0": "Maroon", "220,20,60": "Crimson",
+  "255,127,80": "Coral", "240,230,140": "Khaki", "255,219,88": "Mustard", "127,255,0": "Chartreuse", "191,255,0": "Lime",
+  "46,139,87": "Sea Green", "64,224,208": "Turquoise", "0,255,255": "Aqua", "135,206,235": "Sky Blue", "65,105,225": "Royal Blue", "0,0,128": "Navy",
+  "230,230,250": "Lavender", "255,0,255": "Magenta", "255,119,255": "Fuchsia", "255,255,240": "Ivory", "189,252,201": "Mint", "255,102,204": "Rose",
+  "146,73,0": "Saddle Brown", "128,0,32": "Burgundy", "255,191,0": "Amber", "107,142,35": "Olive Drab", "204,204,255": "Periwinkle", "42,82,190": "Cerulean",
+  "64,130,109": "Viridian", "224,176,255": "Mauve", "112,66,20": "Sepia", "0,0,144": "Darker Blue"
+};
+
+// Mapping real bplace.org color IDs to our palette positions
+// This handles cases where site has duplicate colors or different numbering
+const BPLACE_ID_TO_PALETTE_INDEX = {
+  // Free colors 1-31 map directly
+  1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 10: 9,
+  11: 10, 12: 11, 13: 12, 14: 13, 15: 14, 16: 15, 17: 16, 18: 17, 19: 18, 20: 19,
+  21: 20, 22: 21, 23: 22, 24: 23, 25: 24, 26: 25, 27: 26, 28: 27, 29: 28, 30: 29, 31: 30,
+  // Paid colors with careful mapping
+  32: 31, 33: 32, 34: 33, 35: 34, 36: 35, 37: 36, 38: 37, 39: 38, 40: 39, 41: 40,
+  42: 41, 43: 42, 44: 43, 45: 44, 46: 45, 47: 46, 48: 47, 49: 48, 50: 49, 51: 50,
+  52: 51, 53: 52, 54: 53, 55: 54, 56: 55, 57: 56, 58: 57, 59: 58, 60: 59, 61: 60,
+  62: 61, 63: 62, 64: 63, 65: 64, 66: 65, 67: 66, 68: 67, 69: 33, // Salmon maps to same as Light Red
+  70: 68, 71: 69, 72: 70, 73: 71, 74: 72, 75: 73, 76: 74, 77: 75, 78: 76, 79: 77,
+  80: 78, 81: 79, 82: 80, 83: 81, 84: 82, 85: 83, 86: 84, 87: 85, 88: 86, 89: 87,
+  90: 88, 91: 89, 92: 90, 93: 91, 94: 92, 95: 93 // Darker Blue
+};
+
+// Reverse mapping for palette index to site ID
+const PALETTE_INDEX_TO_BPLACE_ID = {};
+Object.entries(BPLACE_ID_TO_PALETTE_INDEX).forEach(([siteId, paletteIndex]) => {
+  if (!PALETTE_INDEX_TO_BPLACE_ID[paletteIndex]) {
+    PALETTE_INDEX_TO_BPLACE_ID[paletteIndex] = parseInt(siteId);
+  }
+});
+
+// All paid colors (IDs 32-95)
+const paidColors = new Set([
+  "170,170,170", "165,14,30", "250,128,114", "228,92,26", "214,181,148", "156,132,49",
+  "197,173,49", "232,212,95", "74,107,58", "90,148,74", "132,197,115", "15,121,159",
+  "187,250,242", "125,199,255", "77,49,184", "74,66,132", "122,113,196", "181,174,241",
+  "219,164,99", "209,128,81", "255,197,165", "155,82,73", "209,128,120", "250,182,164",
+  "123,99,82", "156,132,107", "51,57,65", "109,117,141", "179,185,209", "109,100,63",
+  "148,140,107", "205,197,158", "102,204,255", "91,191,185", "128,0,0", "220,20,60",
+  "255,127,80", "240,230,140", "255,219,88", "127,255,0", "191,255,0",
+  "46,139,87", "64,224,208", "0,255,255", "135,206,235", "65,105,225", "0,0,128",
+  "230,230,250", "255,0,255", "255,119,255", "255,255,240", "189,252,201", "255,102,204",
+  "146,73,0", "128,0,32", "255,191,0", "107,142,35", "204,204,255", "42,82,190",
+  "64,130,109", "224,176,255", "112,66,20", "0,0,144"
+]);
+
+// Generate color mappings with new IDs
+const basic_colors = {};
+const premium_colors = {};
+MASTER_PALETTE.forEach((color, index) => {
+  const colorKey = color.join(',');
+  const colorId = index + 1;
+  if (paidColors.has(colorKey)) {
+    premium_colors[colorKey] = colorId;
+  } else {
+    basic_colors[colorKey] = colorId;
+  }
+});
+
 const pallete = { ...basic_colors, ...premium_colors };
 const colorBitmapShift = Object.keys(basic_colors).length + 1;
 
@@ -948,7 +1058,7 @@ class WPlacer {
           if (tx !== targetTx || ty !== targetTy) continue;
           const localPx = globalPx % tileSize;
           const localPy = globalPy % tileSize;
-          const body = { colors: [templateColor], coords: [localPx, localPy], t: this.token };
+          const body = { colors: [templateColor], coords: [localPx, localPy], t: "skip" };
           if (globalThis.__wplacer_last_fp) body.fp = globalThis.__wplacer_last_fp;
           const res = await this._executePaint(targetTx, targetTy, body);
           if (res && res.success && res.painted > 0) {
@@ -1391,7 +1501,7 @@ class WPlacer {
         await this.loadTiles();
         this._lastTilesAt = Date.now();
       }
-      if (!this.token) throw new Error("REFRESH_TOKEN"); // TokenManager must provide before calling
+      // Token check removed: no longer needed for new bplace.org (only CF-Clearance and JWT)
 
       let activeMethod = method;
       if (method === "burst-mixed") {
@@ -1604,7 +1714,7 @@ class WPlacer {
       for (const tileKey in bodiesByTile) {
         if (this._isCancelled()) { needsRetry = false; break; }
         const [tx, ty] = tileKey.split(",").map(Number);
-        const body = { ...bodiesByTile[tileKey], t: this.token };
+        const body = { ...bodiesByTile[tileKey], t: "skip" };
         if (globalThis.__wplacer_last_fp) body.fp = globalThis.__wplacer_last_fp;
         const result = await this._executePaint(tx, ty, body);
         if (result.success) {
@@ -1774,8 +1884,16 @@ class WPlacer {
 
         if (shouldPaint) {
           total++;
-          if (templateColor >= 32) { premium++; premiumColors.add(templateColor); }
-          else if (templateColor > 0) { basic++; }
+          // Check if color is premium using the new palette system
+          if (templateColor > 0 && templateColor <= MASTER_PALETTE.length) {
+            const colorRgb = MASTER_PALETTE[templateColor - 1];
+            const colorKey = colorRgb.join(',');
+            if (paidColors.has(colorKey)) {
+              premium++; premiumColors.add(templateColor);
+            } else {
+              basic++;
+            }
+          }
         }
       }
     }
@@ -2051,7 +2169,14 @@ class TemplateManager {
       for (let x = 0; x < t.width; x++) {
         for (let y = 0; y < t.height; y++) {
           const id = t.data?.[x]?.[y] | 0;
-          if (id >= 32 && id <= 63) set.add(id);
+          // Check if color ID corresponds to a paid color using the new palette
+          if (id > 0 && id <= MASTER_PALETTE.length) {
+            const colorRgb = MASTER_PALETTE[id - 1];
+            const colorKey = colorRgb.join(',');
+            if (paidColors.has(colorKey)) {
+              set.add(id);
+            }
+          }
         }
       }
       return set;
@@ -2059,9 +2184,44 @@ class TemplateManager {
   }
 
   _hasPremium(bitmap, cid) {
-    if (cid < 32) return true;
-    const bit = cid - 32;
-    return ((bitmap | 0) & (1 << bit)) !== 0;
+    // Check if this is a valid bplace.org color ID
+    if (!BPLACE_ID_TO_PALETTE_INDEX.hasOwnProperty(cid)) {
+      return false;
+    }
+
+    // Free colors (1-31) are always available
+    if (cid >= 1 && cid <= 31) {
+      return true;
+    }
+
+    // Convert hex string to BigInt if necessary
+    let bitMapBig;
+    try {
+      if (typeof bitmap === 'string') {
+        // Handle hex strings properly - add 0x prefix only if not present
+        const hexStr = bitmap.startsWith('0x') ? bitmap : '0x' + bitmap;
+        bitMapBig = BigInt(hexStr);
+      } else {
+        bitMapBig = BigInt(bitmap || 0);
+      }
+    } catch (e) {
+      console.error(`[DEBUG] _hasPremium BigInt conversion error:`, {
+        bitmap,
+        cid,
+        bitmapType: typeof bitmap,
+        error: e.message
+      });
+      return false;
+    }
+
+    // For premium colors, find the bit position
+    // The bit position corresponds to the premium color index (cid - 32)
+    if (cid >= 32 && cid <= 95) {
+      const bit = BigInt(cid - 32);
+      return (bitMapBig & (BigInt(1) << bit)) !== BigInt(0);
+    }
+
+    return false;
   }
 
   async _tryAutoBuyNeededColors() {
@@ -2082,7 +2242,7 @@ class TemplateManager {
       const w = new WPlacer(dummyTemplate, dummyCoords, currentSettings, this.name);
       try {
         await w.login(u.cookies); await w.loadUserInfo();
-        const rec = { id: userId, name: w.userInfo.name, droplets: Number(w.userInfo.droplets || 0), bitmap: Number(w.userInfo.extraColorsBitmap || 0) };
+        const rec = { id: userId, name: w.userInfo.name, droplets: Number(w.userInfo.droplets || 0), bitmap: w.userInfo.extraColorsBitmap || "0" };
         candidates.push(rec);
       } catch (e) {
         logUserError(e, userId, u?.name || `#${userId}`, "autobuy colors: load info");
@@ -2092,7 +2252,25 @@ class TemplateManager {
 
     // sort by current number of premium colors asc
     const premiumCount = (bitmap) => {
-      let c = 0; for (let i = 0; i <= 31; i++) if ((bitmap & (1 << i)) !== 0) c++; return c;
+      let c = 0;
+      let bitmapBig;
+      try {
+        if (typeof bitmap === 'string') {
+          const hexStr = bitmap.startsWith('0x') ? bitmap : '0x' + bitmap;
+          bitmapBig = BigInt(hexStr);
+        } else {
+          bitmapBig = BigInt(bitmap || 0);
+        }
+        for (let i = 0; i <= 63; i++) if ((bitmapBig & (BigInt(1) << BigInt(i))) !== BigInt(0)) c++;
+        return c;
+      } catch (e) {
+        console.error(`[DEBUG] premiumCount BigInt conversion error:`, {
+          bitmap,
+          bitmapType: typeof bitmap,
+          error: e.message
+        });
+        return 0;
+      }
     };
 
     // 2) for each required premium color in ascending order
@@ -2125,7 +2303,7 @@ class TemplateManager {
         const before = Number(w.userInfo.droplets || 0);
         if ((before - reserve) < COLOR_COST) { /* just in case */ throw new Error("insufficient_droplets"); }
         // if already has (race), skip
-        if (this._hasPremium(Number(w.userInfo.extraColorsBitmap || 0), cid)) {
+        if (this._hasPremium(w.userInfo.extraColorsBitmap || "0", cid)) {
           log(buyer.id, w.userInfo.name, `[${this.name}] ⏭️ Skip auto-buy color #${cid}: account already owns this color.`);
           continue;
         }
@@ -2135,7 +2313,7 @@ class TemplateManager {
         await w.loadUserInfo().catch(() => { });
         log(buyer.id, w.userInfo.name, `[${this.name}] 🛒 Auto-bought premium color #${cid}. Droplets ${before} → ${w.userInfo?.droplets}`);
         // reflect in candidates for subsequent colors
-        buyer.bitmap = Number(w.userInfo.extraColorsBitmap || (buyer.bitmap | (1 << (cid - 32))));
+        buyer.bitmap = w.userInfo.extraColorsBitmap || buyer.bitmap;
         buyer.droplets = Number(w.userInfo?.droplets || (before - COLOR_COST));
         purchasedAny = true;
         bought.push(cid);
@@ -2372,9 +2550,9 @@ class TemplateManager {
                     await w.login(users[uid].cookies);
                     await w.loadUserInfo();
                     if ((Number(w.userInfo.droplets || 0) - reserve) >= 2000) { anyCanBuy = true; }
-                    const bitmap = Number(w.userInfo.extraColorsBitmap || 0);
+                    const bitmap = w.userInfo.extraColorsBitmap || "0";
                     for (const cid of Array.from(summary.premiumColors)) {
-                      if (cid >= 32 && ((bitmap & (1 << (cid - 32))) !== 0)) { anyOwnsRemaining = true; break; }
+                      if (this._hasPremium(bitmap, cid)) { anyOwnsRemaining = true; break; }
                     }
                   }
                   catch { } finally { activeBrowserUsers.delete(uid); }
@@ -2726,8 +2904,8 @@ async function isCfTokenValid(cfToken) {
       }
     });
 
-    // If we get a 403 or challenge page, token is likely invalid
-    if (response.status === 403 || response.status === 503) {
+    // If we get a 403, 502 or 503 or challenge page, token is likely invalid
+    if (response.status === 403 || response.status === 502 || response.status === 503) {
       return false;
     }
 
@@ -3785,8 +3963,22 @@ app.get("/user/status/:id", async (req, res) => {
     return res.status(409).json({ error: "User not found" });
   }
   if (activeBrowserUsers.has(id)) {
-    console.log(`❌ [DEBUG] User ${id} is already active`);
-    return res.status(409).json({ error: "User is already active" });
+    console.log(`⚠️ [DEBUG] User ${id} is already active, waiting for completion...`);
+    // Wait up to 10 seconds for the user to become available
+    let waitTime = 0;
+    const maxWait = 10000; // 10 seconds
+    const checkInterval = 500; // 500ms
+
+    while (activeBrowserUsers.has(id) && waitTime < maxWait) {
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      waitTime += checkInterval;
+    }
+
+    if (activeBrowserUsers.has(id)) {
+      console.log(`❌ [DEBUG] User ${id} still active after ${maxWait}ms wait`);
+      return res.status(409).json({ error: "User is already active" });
+    }
+    console.log(`✅ [DEBUG] User ${id} became available after ${waitTime}ms wait`);
   }
   activeBrowserUsers.add(id);
   console.log(`🔥 [DEBUG] Creating WPlacer instance for user ${id}`);
@@ -4228,8 +4420,8 @@ app.post("/users/purchase-color", async (req, res) => {
   try {
     const { colorId, userIds } = req.body || {};
     const cid = Number(colorId);
-    if (!Number.isFinite(cid) || cid < 32 || cid > 63) {
-      return res.status(400).json({ error: "colorId must be a premium color id (32..63)" });
+    if (!Number.isFinite(cid) || cid < 32 || cid > 95) {
+      return res.status(400).json({ error: "colorId must be a premium color id (32..95)" });
     }
     if (!Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({ error: "userIds must be a non-empty array" });
@@ -4250,7 +4442,24 @@ app.post("/users/purchase-color", async (req, res) => {
 
     const hasColor = (bitmap, colorId) => {
       const bit = colorId - 32;
-      return (bitmap & (1 << bit)) !== 0;
+      let bitmapBig;
+      try {
+        if (typeof bitmap === 'string') {
+          const hexStr = bitmap.startsWith('0x') ? bitmap : '0x' + bitmap;
+          bitmapBig = BigInt(hexStr);
+        } else {
+          bitmapBig = BigInt(bitmap || 0);
+        }
+        return (bitmapBig & (BigInt(1) << BigInt(bit))) !== BigInt(0);
+      } catch (e) {
+        console.error(`[DEBUG] hasColor BigInt conversion error:`, {
+          bitmap,
+          colorId,
+          bitmapType: typeof bitmap,
+          error: e.message
+        });
+        return false;
+      }
     };
 
     const useParallel = !!currentSettings.proxyEnabled && loadedProxies.length > 0;
@@ -4275,7 +4484,7 @@ app.post("/users/purchase-color", async (req, res) => {
             await w.loadUserInfo();
             const name = w.userInfo.name;
             purchaseColorJob.lastUserId = uid; purchaseColorJob.lastUserName = name;
-            const beforeBitmap = Number(w.userInfo.extraColorsBitmap || 0);
+            const beforeBitmap = w.userInfo.extraColorsBitmap || "0";
             const beforeDroplets = Number(w.userInfo.droplets || 0);
             if (hasColor(beforeBitmap, cid)) {
               report.push({ userId: uid, name, skipped: true, reason: "already_has_color" });
@@ -4319,7 +4528,7 @@ app.post("/users/purchase-color", async (req, res) => {
           await w.loadUserInfo();
           const name = w.userInfo.name;
           purchaseColorJob.lastUserId = uid; purchaseColorJob.lastUserName = name;
-          const beforeBitmap = Number(w.userInfo.extraColorsBitmap || 0);
+          const beforeBitmap = w.userInfo.extraColorsBitmap || "0";
           const beforeDroplets = Number(w.userInfo.droplets || 0);
           if (hasColor(beforeBitmap, cid)) {
             report.push({ userId: uid, name, skipped: true, reason: "already_has_color" });
@@ -4798,7 +5007,7 @@ app.post("/users/colors-check", async (req, res) => {
             const levelNum = Number(u?.level || 0);
             const level = Math.floor(levelNum);
             const progress = Math.round((levelNum % 1) * 100);
-            colorsCheckJob.report.push({ userId: uid, name: u?.name || urec.name, extraColorsBitmap: Number(u?.extraColorsBitmap || 0), droplets: Number(u?.droplets || 0), charges, level, progress, flagsBitmap: String(u?.flagsBitmap || ""), equippedFlag: Number(u?.equippedFlag || 0) });
+            colorsCheckJob.report.push({ userId: uid, name: u?.name || urec.name, extraColorsBitmap: String(u?.extraColorsBitmap || "0"), droplets: Number(u?.droplets || 0), charges, level, progress, flagsBitmap: String(u?.flagsBitmap || ""), equippedFlag: Number(u?.equippedFlag || 0) });
           } catch (e) {
             logUserError(e, uid, urec.name, "colors check");
             colorsCheckJob.report.push({ userId: uid, name: urec.name, error: e?.message || "login_failed" });
@@ -4837,7 +5046,7 @@ app.post("/users/colors-check", async (req, res) => {
           const levelNum = Number(u?.level || 0);
           const level = Math.floor(levelNum);
           const progress = Math.round((levelNum % 1) * 100);
-          colorsCheckJob.report.push({ userId: uid, name: u?.name || urec.name, extraColorsBitmap: Number(u?.extraColorsBitmap || 0), droplets: Number(u?.droplets || 0), charges, level, progress, flagsBitmap: String(u?.flagsBitmap || ""), equippedFlag: Number(u?.equippedFlag || 0) });
+          colorsCheckJob.report.push({ userId: uid, name: u?.name || urec.name, extraColorsBitmap: String(u?.extraColorsBitmap || "0"), droplets: Number(u?.droplets || 0), charges, level, progress, flagsBitmap: String(u?.flagsBitmap || ""), equippedFlag: Number(u?.equippedFlag || 0) });
         } catch (e) {
           logUserError(e, uid, urec.name, "colors check");
           colorsCheckJob.report.push({ userId: uid, name: urec.name, error: e?.message || "login_failed" });
@@ -5954,8 +6163,13 @@ app.get('/export-tokens', (req, res) => {
   // Process-level safety nets and graceful shutdown
   try {
     process.on('uncaughtException', (err) => {
-      console.error('[Process] uncaughtException:', err?.stack || err);
-      try { appendFileSync(path.join(dataDir, 'errors.log'), `[${new Date().toLocaleString()}] uncaughtException: ${err?.stack || err}\n`); } catch (_) { }
+      // Avoid logging EPIPE errors to prevent infinite loop
+      if (err?.code !== 'EPIPE') {
+        try {
+          console.error('[Process] uncaughtException:', err?.stack || err);
+          appendFileSync(path.join(dataDir, 'errors.log'), `[${new Date().toLocaleString()}] uncaughtException: ${err?.stack || err}\n`);
+        } catch (_) { }
+      }
     });
     process.on('unhandledRejection', (reason) => {
       console.error('[Process] unhandledRejection:', reason);

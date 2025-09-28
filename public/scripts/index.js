@@ -628,9 +628,79 @@ userForm.addEventListener('submit', async (e) => {
 });
 
 
-const basic_colors = { "0,0,0": 1, "60,60,60": 2, "120,120,120": 3, "210,210,210": 4, "255,255,255": 5, "96,0,24": 6, "237,28,36": 7, "255,127,39": 8, "246,170,9": 9, "249,221,59": 10, "255,250,188": 11, "14,185,104": 12, "19,230,123": 13, "135,255,94": 14, "12,129,110": 15, "16,174,166": 16, "19,225,190": 17, "40,80,158": 18, "64,147,228": 19, "96,247,242": 20, "107,80,246": 21, "153,177,251": 22, "120,12,153": 23, "170,56,185": 24, "224,159,249": 25, "203,0,122": 26, "236,31,128": 27, "243,141,169": 28, "104,70,52": 29, "149,104,42": 30, "248,178,119": 31 };
-const premium_colors = { "170,170,170": 32, "165,14,30": 33, "250,128,114": 34, "228,92,26": 35, "214,181,148": 36, "156,132,49": 37, "197,173,49": 38, "232,212,95": 39, "74,107,58": 40, "90,148,74": 41, "132,197,115": 42, "15,121,159": 43, "187,250,242": 44, "125,199,255": 45, "77,49,184": 46, "74,66,132": 47, "122,113,196": 48, "181,174,241": 49, "219,164,99": 50, "209,128,81": 51, "255,197,165": 52, "155,82,73": 53, "209,128,120": 54, "250,182,164": 55, "123,99,82": 56, "156,132,107": 57, "51,57,65": 58, "109,117,141": 59, "179,185,209": 60, "109,100,63": 61, "148,140,107": 62, "205,197,158": 63 };
+// Complete Colors / Palette from bplace.org (96 colors: ID 0-95)
+const MASTER_PALETTE = [
+  // ID 0: Transparent
+  [0,0,0],
+  // ID 1-31: Free colors
+  [0,0,0],[60,60,60],[120,120,120],[210,210,210],[255,255,255],
+  [96,0,24],[237,28,36],[255,127,39],[246,170,9],[249,221,59],[255,250,188],
+  [14,185,104],[19,230,123],[135,255,94],[12,129,110],[16,174,166],[19,225,190],
+  [40,80,158],[64,147,228],[96,247,242],[107,80,246],[153,177,251],
+  [120,12,153],[170,56,185],[224,159,249],[203,0,122],[236,31,128],[243,141,169],
+  [104,70,52],[149,104,42],[248,178,119],
+  // ID 32-95: Paid colors
+  [170,170,170],[165,14,30],[250,128,114],[228,92,26],[214,181,148],[156,132,49],
+  [197,173,49],[232,212,95],[74,107,58],[90,148,74],[132,197,115],[15,121,159],
+  [187,250,242],[125,199,255],[77,49,184],[74,66,132],[122,113,196],[181,174,241],
+  [219,164,99],[209,128,81],[255,197,165],[155,82,73],[209,128,120],[250,182,164],
+  [123,99,82],[156,132,107],[51,57,65],[109,117,141],[179,185,209],[109,100,63],
+  [148,140,107],[205,197,158],[102,204,255],[91,191,185],[128,0,0],[220,20,60],
+  [255,127,80],[250,128,114],[240,230,140],[255,219,88],[127,255,0],[191,255,0],
+  [46,139,87],[64,224,208],[0,255,255],[135,206,235],[65,105,225],[0,0,128],
+  [230,230,250],[255,0,255],[255,119,255],[255,255,240],[189,252,201],[255,102,204],
+  [146,73,0],[128,0,32],[255,191,0],[107,142,35],[204,204,255],[42,82,190],
+  [64,130,109],[224,176,255],[112,66,20],[0,0,144]
+];
+
+// All paid colors (IDs 32-95)
+const paidColors = new Set([
+  "170,170,170", "165,14,30", "250,128,114", "228,92,26", "214,181,148", "156,132,49",
+  "197,173,49", "232,212,95", "74,107,58", "90,148,74", "132,197,115", "15,121,159",
+  "187,250,242", "125,199,255", "77,49,184", "74,66,132", "122,113,196", "181,174,241",
+  "219,164,99", "209,128,81", "255,197,165", "155,82,73", "209,128,120", "250,182,164",
+  "123,99,82", "156,132,107", "51,57,65", "109,117,141", "179,185,209", "109,100,63",
+  "148,140,107", "205,197,158", "102,204,255", "91,191,185", "128,0,0", "220,20,60",
+  "255,127,80", "240,230,140", "255,219,88", "127,255,0", "191,255,0",
+  "46,139,87", "64,224,208", "0,255,255", "135,206,235", "65,105,225", "0,0,128",
+  "230,230,250", "255,0,255", "255,119,255", "255,255,240", "189,252,201", "255,102,204",
+  "146,73,0", "128,0,32", "255,191,0", "107,142,35", "204,204,255", "42,82,190",
+  "64,130,109", "224,176,255", "112,66,20", "0,0,144"
+]);
+
+// Helper function to get palette color by ID (direct mapping)
+const getPaletteColorById = (id) => {
+  return (id >= 0 && id < MASTER_PALETTE.length) ? MASTER_PALETTE[id] : null;
+};
+
+// Generate color mappings with correct IDs (0-95)
+const basic_colors = {};
+const premium_colors = {};
+MASTER_PALETTE.forEach((color, index) => {
+  const colorKey = color.join(',');
+  const colorId = index; // Direct mapping: index 0 = ID 0, index 1 = ID 1, etc.
+
+  // Skip transparent color (ID 0) in color selection
+  if (colorId === 0) return;
+
+  if (paidColors.has(colorKey)) {
+    premium_colors[colorKey] = colorId;
+  } else {
+    basic_colors[colorKey] = colorId;
+  }
+});
+
 const colors = { ...basic_colors, ...premium_colors };
+
+// Helper function to check if color is premium
+const isPremiumColor = (colorId) => {
+  if (colorId >= 0 && colorId < MASTER_PALETTE.length) {
+    const colorRgb = MASTER_PALETTE[colorId];
+    const colorKey = colorRgb.join(',');
+    return paidColors.has(colorKey);
+  }
+  return false;
+};
 
 const colorById = (id) => Object.keys(colors).find(key => colors[key] === id);
 const closest = (rgb) => {
@@ -2820,8 +2890,19 @@ openManageUsers.addEventListener("click", async () => {
                     const response = await axios.get(`/user/status/${id}`);
                     const u = response.data;
                     const paidColors = [];
-                    for (let c = 32; c <= 63; c++) {
-                        if ((u.extraColorsBitmap | 0) & (1 << (c - 32))) paidColors.push(c);
+                    // Use bplace.org frontend logic: bit position = colorId - 32
+                    const bitmapStr = u.extraColorsBitmap || "0";
+                    const hexStr = typeof bitmapStr === 'string' ?
+                        (bitmapStr.startsWith('0x') ? bitmapStr : '0x' + bitmapStr) :
+                        bitmapStr;
+                    const bitmap = BigInt(hexStr);
+
+                    // Check all premium colors (32-95)
+                    for (let colorId = 32; colorId <= 95; colorId++) {
+                        const bitPos = colorId - 32;
+                        if ((bitmap & (BigInt(1) << BigInt(bitPos))) !== BigInt(0)) {
+                            paidColors.push(colorId);
+                        }
                     }
                     const paidSwatches = paidColors.map(cid => {
                         const meta = COLORS.find(c => c.id === cid);
@@ -3541,7 +3622,7 @@ openAddTemplate.addEventListener("click", () => {
             if (!tpl?.data) return set;
             for (let x = 0; x < tpl.width; x++) {
                 for (let y = 0; y < tpl.height; y++) {
-                    const id = tpl.data?.[x]?.[y] | 0; if (id >= 32 && id <= 63) set.add(id);
+                    const id = tpl.data?.[x]?.[y] | 0; if (isPremiumColor(id)) set.add(id);
                 }
             }
         } catch { }
@@ -3864,7 +3945,7 @@ openManageTemplates.addEventListener("click", () => {
                         const tpl = t.template; if (!tpl?.data) return false;
                         for (let x = 0; x < tpl.width; x++) {
                             for (let y = 0; y < tpl.height; y++) {
-                                const id = tpl.data?.[x]?.[y] | 0; if (id >= 32 && id <= 63) return true;
+                                const id = tpl.data?.[x]?.[y] | 0; if (isPremiumColor(id)) return true;
                             }
                         }
                     } catch (_) { }
@@ -5477,9 +5558,10 @@ parallelWorkers?.addEventListener('change', async () => {
     }
 });
 
-// Palette
+// Complete palette - all 95 colors from bplace.org
 const COLORS = [
     { id: 0, name: "Transparent", rgb: [0, 0, 0] },
+    // Free colors (1-31)
     { id: 1, name: "Black", rgb: [0, 0, 0] },
     { id: 2, name: "Dark Gray", rgb: [60, 60, 60] },
     { id: 3, name: "Gray", rgb: [120, 120, 120] },
@@ -5511,6 +5593,7 @@ const COLORS = [
     { id: 29, name: "Dark Brown", rgb: [104, 70, 52] },
     { id: 30, name: "Brown", rgb: [149, 104, 42] },
     { id: 31, name: "Beige", rgb: [248, 178, 119] },
+    // Paid colors (32-94)
     { id: 32, name: "Medium Gray", rgb: [170, 170, 170] },
     { id: 33, name: "Dark Red", rgb: [165, 14, 30] },
     { id: 34, name: "Light Red", rgb: [250, 128, 114] },
@@ -5542,7 +5625,39 @@ const COLORS = [
     { id: 60, name: "Light Slate", rgb: [179, 185, 209] },
     { id: 61, name: "Dark Stone", rgb: [109, 100, 63] },
     { id: 62, name: "Stone", rgb: [148, 140, 107] },
-    { id: 63, name: "Light Stone", rgb: [205, 197, 158] }
+    { id: 63, name: "Light Stone", rgb: [205, 197, 158] },
+    { id: 64, name: "#66CCFF", rgb: [102, 204, 255] },
+    { id: 65, name: "Aquamarine", rgb: [91, 191, 185] },
+    { id: 66, name: "Maroon", rgb: [128, 0, 0] },
+    { id: 67, name: "Crimson", rgb: [220, 20, 60] },
+    { id: 68, name: "Coral", rgb: [255, 127, 80] },
+    { id: 69, name: "Salmon", rgb: [250, 128, 114] },
+    { id: 70, name: "Khaki", rgb: [240, 230, 140] },
+    { id: 71, name: "Mustard", rgb: [255, 219, 88] },
+    { id: 72, name: "Chartreuse", rgb: [127, 255, 0] },
+    { id: 73, name: "Lime", rgb: [191, 255, 0] },
+    { id: 74, name: "Sea Green", rgb: [46, 139, 87] },
+    { id: 75, name: "Turquoise", rgb: [64, 224, 208] },
+    { id: 76, name: "Aqua", rgb: [0, 255, 255] },
+    { id: 77, name: "Sky Blue", rgb: [135, 206, 235] },
+    { id: 78, name: "Royal Blue", rgb: [65, 105, 225] },
+    { id: 79, name: "Navy", rgb: [0, 0, 128] },
+    { id: 80, name: "Lavender", rgb: [230, 230, 250] },
+    { id: 81, name: "Magenta", rgb: [255, 0, 255] },
+    { id: 82, name: "Fuchsia", rgb: [255, 119, 255] },
+    { id: 83, name: "Ivory", rgb: [255, 255, 240] },
+    { id: 84, name: "Mint", rgb: [189, 252, 201] },
+    { id: 85, name: "Rose", rgb: [255, 102, 204] },
+    { id: 86, name: "Saddle Brown", rgb: [146, 73, 0] },
+    { id: 87, name: "Burgundy", rgb: [128, 0, 32] },
+    { id: 88, name: "Amber", rgb: [255, 191, 0] },
+    { id: 89, name: "Olive Drab", rgb: [107, 142, 35] },
+    { id: 90, name: "Periwinkle", rgb: [204, 204, 255] },
+    { id: 91, name: "Cerulean", rgb: [42, 82, 190] },
+    { id: 92, name: "Viridian", rgb: [64, 130, 109] },
+    { id: 93, name: "Mauve", rgb: [224, 176, 255] },
+    { id: 94, name: "Sepia", rgb: [112, 66, 20] },
+    { id: 95, name: "Darker Blue", rgb: [0, 0, 144] }
 ];
 
 function getContrastColor(r, g, b) {
@@ -5565,7 +5680,7 @@ function computePalette(template) {
     for (const [id, count] of counts.entries()) {
         const rgbStr = colorById(id);
         if (!rgbStr) continue;
-        const isPremium = id >= 32 && id <= 63;
+        const isPremium = isPremiumColor(id);
         items.push({ id, rgb: rgbStr, count, isPremium });
     }
     items.sort((a, b) => (b.count - a.count) || (a.id - b.id));
@@ -5670,7 +5785,7 @@ function fillEditorFromTemplate(t) {
     };
     const hasAnyPremium = (template) => {
         const { width, height, data } = template;
-        for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) if ((data[x][y] | 0) >= 32) return true;
+        for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) if (isPremiumColor(data[x][y] | 0)) return true;
         return false;
     };
     // premium → nearest basic using colorById/closest/basic_colors
@@ -5682,7 +5797,7 @@ function fillEditorFromTemplate(t) {
             for (let y = 0; y < height; y++) {
                 let id = data[x][y] | 0;
                 if (id <= 0) { m[x][y] = 0; continue; }
-                if (id >= 32) { // premium — map to basic
+                if (isPremiumColor(id)) { // premium — map to basic
                     const rgb = colorById(id);               // "r,g,b"
                     id = (rgb && basic_colors[rgb]) ? basic_colors[rgb] : closest(rgb);
                 }
@@ -5795,9 +5910,62 @@ function buildAllColorsPalette() {
     try {
         const mapById = COLORS_CACHE?.report?.reduce((m, r) => { if (r && r.userId && !r.error) m[r.userId] = r; return m; }, {}) || {};
         for (const uid of Object.keys(mapById)) {
-            const bitmap = mapById[uid].extraColorsBitmap | 0;
-            for (let cid = 1; cid <= 63; cid++) {
-                const has = cid < 32 ? true : ((bitmap & (1 << (cid - 32))) !== 0);
+            const bitmapStr = mapById[uid].extraColorsBitmap || "0";
+            let bitmap;
+            try {
+                if (typeof bitmapStr === 'string') {
+                    // Handle hex strings properly
+                    bitmap = BigInt(bitmapStr.startsWith('0x') ? bitmapStr : '0x' + bitmapStr);
+                } else {
+                    bitmap = BigInt(bitmapStr);
+                }
+            } catch (e) {
+                console.error('Failed to parse bitmap:', bitmapStr, e);
+                bitmap = BigInt(0);
+            }
+            // Debug: Log bitmap for specific user
+            if (mapById[uid].name === 'mimi') {
+                console.log(`Debug: User ${mapById[uid].name}`);
+                console.log('Raw extraColorsBitmap:', bitmapStr, 'type:', typeof bitmapStr);
+                console.log('Expected hex: 8000000000000803');
+                console.log('Parsed as BigInt hex:', bitmap.toString(16));
+                console.log('Expected binary: 1000000000000000000000000000000000000000000000000000100000000011');
+                console.log('Actual binary:', bitmap.toString(2));
+
+                // Test expected value
+                const expectedBitmap = BigInt('0x8000000000000803');
+                console.log('Expected bitmap:', expectedBitmap.toString(16));
+                console.log('Are they equal?', bitmap === expectedBitmap);
+
+                console.log('Testing bits with bplace.org logic (colorId - 32):');
+                for (let colorId = 32; colorId <= 95; colorId++) {
+                    const bitPos = colorId - 32;
+                    const hasBit = (bitmap & (BigInt(1) << BigInt(bitPos))) !== BigInt(0);
+                    if (hasBit) {
+                        console.log(`Color ${colorId} (bit ${bitPos}): ${hasBit}`);
+                    }
+                }
+
+                console.log('Testing bits with expected bitmap using bplace logic:');
+                for (let colorId = 32; colorId <= 95; colorId++) {
+                    const bitPos = colorId - 32;
+                    const hasBit = (expectedBitmap & (BigInt(1) << BigInt(bitPos))) !== BigInt(0);
+                    if (hasBit) {
+                        console.log(`Color ${colorId} (bit ${bitPos}): ${hasBit}`);
+                    }
+                }
+            }
+            for (let cid = 0; cid <= 95; cid++) {
+                let has;
+                if (cid <= 31) {
+                    has = true; // Free colors
+                } else {
+                    // Use bplace.org frontend logic: bit position = colorId - 32
+                    const bitPos = cid - 32;
+
+                    // Use BigInt for all operations since bitmap is now BigInt
+                    has = (bitmap & (BigInt(1) << BigInt(bitPos))) !== BigInt(0);
+                }
                 if (has) countByColor.set(cid, (countByColor.get(cid) || 0) + 1);
             }
         }
@@ -5806,9 +5974,9 @@ function buildAllColorsPalette() {
     paletteAllColors.innerHTML = items.map(it => {
         const [r, g, b] = it.rgb;
         const textColor = getContrastColor(r, g, b);
-        const kind = it.id >= 32 ? 'Premium' : 'Basic';
+        const kind = isPremiumColor(it.id) ? 'Premium' : 'Basic';
         const cnt = countByColor.get(it.id) || 0;
-        const badge = (it.id >= 32 && cnt > 0) ? `<span class="count-badge" title="Users with this color">${cnt}</span>` : '';
+        const badge = (isPremiumColor(it.id) && cnt > 0) ? `<span class="count-badge" title="Users with this color">${cnt}</span>` : '';
         return `
       <article class="palette-item color-tile" data-color-id="${it.id}" data-kind="${kind.toLowerCase()}" title="ID ${it.id}">
         <div class="swatch" style="background: rgb(${r}, ${g}, ${b}); color: ${textColor}">#${it.id}</div>
@@ -5823,10 +5991,24 @@ function buildAllColorsPalette() {
 }
 
 function hasPremiumColor(extraColorsBitmap, colorId) {
-    // premium: 32..63
-    if (colorId < 32) return true;
-    const bit = (colorId - 32);
-    return (extraColorsBitmap & (1 << bit)) !== 0;
+    // Free colors (0-31) are always available
+    if (colorId <= 31) return true;
+
+    // Convert hex string to BigInt if necessary
+    let bitmap;
+    if (typeof extraColorsBitmap === 'string') {
+        const hexStr = extraColorsBitmap.startsWith('0x') ? extraColorsBitmap : '0x' + extraColorsBitmap;
+        bitmap = BigInt(hexStr);
+    } else {
+        bitmap = BigInt(extraColorsBitmap || 0);
+    }
+
+    // Use bplace.org frontend logic: bit position = colorId - 32
+    // This matches their hasColor function
+    const bitPos = colorId - 32;
+
+    // Always use BigInt for all bit operations
+    return (bitmap & (BigInt(1) << BigInt(bitPos))) !== BigInt(0);
 }
 
 async function loadUsersColorState(fromCacheOnly = false) {
@@ -5835,21 +6017,22 @@ async function loadUsersColorState(fromCacheOnly = false) {
         const mapById = COLORS_CACHE?.report?.reduce((m, r) => { if (r && r.userId && !r.error) m[r.userId] = r; return m; }, {}) || {};
         for (const id of Object.keys(users)) {
             const r = mapById[id];
-            if (!r) continue;
             USERS_COLOR_STATE[id] = {
                 name: users[id]?.name || `#${id}`,
-                extraColorsBitmap: r.extraColorsBitmap | 0,
-                droplets: r.droplets | 0
+                extraColorsBitmap: r?.extraColorsBitmap | 0,
+                droplets: r?.droplets | 0
             };
-            LAST_USER_STATUS[id] = {
-                ...(LAST_USER_STATUS[id] || {}),
-                droplets: r.droplets | 0,
-                max: r.charges?.max ?? (LAST_USER_STATUS[id]?.max ?? 0),
-                charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
-                level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
-                progress: Math.round((r.progress ?? 0) | 0),
-                extraColorsBitmap: r.extraColorsBitmap | 0,
-            };
+            if (r) {
+                LAST_USER_STATUS[id] = {
+                    ...(LAST_USER_STATUS[id] || {}),
+                    droplets: r.droplets | 0,
+                    max: r.charges?.max ?? (LAST_USER_STATUS[id]?.max ?? 0),
+                    charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
+                    level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
+                    progress: Math.round((r.progress ?? 0) | 0),
+                    extraColorsBitmap: r.extraColorsBitmap | 0,
+                };
+            }
         }
         saveLastStatus();
         return;
@@ -5866,21 +6049,22 @@ async function loadUsersColorState(fromCacheOnly = false) {
     const mapById = COLORS_CACHE.report.reduce((m, r) => { if (r && r.userId && !r.error) m[r.userId] = r; return m; }, {});
     for (const [id, u] of Object.entries(users)) {
         const r = mapById[id];
-        if (!r) continue;
         USERS_COLOR_STATE[id] = {
             name: u?.name || `#${id}`,
-            extraColorsBitmap: r.extraColorsBitmap | 0,
-            droplets: r.droplets | 0
+            extraColorsBitmap: r?.extraColorsBitmap | 0,
+            droplets: r?.droplets | 0
         };
-        LAST_USER_STATUS[id] = {
-            ...(LAST_USER_STATUS[id] || {}),
-            droplets: r.droplets | 0,
-            max: r.charges?.max ?? (LAST_USER_STATUS[id]?.max ?? 0),
-            charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
-            level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
-            progress: Math.round((r.progress ?? 0) | 0),
-            extraColorsBitmap: r.extraColorsBitmap | 0,
-        };
+        if (r) {
+            LAST_USER_STATUS[id] = {
+                ...(LAST_USER_STATUS[id] || {}),
+                droplets: r.droplets | 0,
+                max: r.charges?.max ?? (LAST_USER_STATUS[id]?.max ?? 0),
+                charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
+                level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
+                progress: Math.round((r.progress ?? 0) | 0),
+                extraColorsBitmap: r.extraColorsBitmap | 0,
+            };
+        }
     }
     saveLastStatus();
     // Refresh current color details and palette badges
@@ -5893,8 +6077,8 @@ function showColorDetails(colorId) {
     if (!meta) return;
     const [r, g, b] = meta.rgb;
     selectedColorTitle.textContent = meta.name;
-    selectedColorKind.textContent = colorId >= 32 ? "Premium" : "Basic";
-    selectedColorKind.classList.toggle('premium', colorId >= 32);
+    selectedColorKind.textContent = isPremiumColor(colorId) ? "Premium" : "Basic";
+    selectedColorKind.classList.toggle('premium', isPremiumColor(colorId));
     selectedColorId.textContent = String(colorId);
     selectedColorSwatch.style.background = `rgb(${r}, ${g}, ${b})`;
     selectedColorSwatch.style.color = getContrastColor(r, g, b);
@@ -5932,7 +6116,7 @@ function showColorDetails(colorId) {
         }).join('')
         : `<span class="muted">Everyone already has this color.</span>`;
 
-    const premium = colorId >= 32;
+    const premium = isPremiumColor(colorId);
     purchaseColorBtn.style.display = premium ? 'inline-flex' : 'none';
     selectAllNoColor?.parentElement?.classList?.toggle('hidden', !premium);
     if (premium && notHave.length === 0) purchaseColorBtn.style.display = 'none';
@@ -5951,7 +6135,7 @@ async function initColorsManager() {
     // by default, load from cache only, no server trigger
     if (COLORS_CACHE) await loadUsersColorState(true);
     if (CURRENT_SELECTED_COLOR == null) {
-        const firstPremium = COLORS.find(c => c.id >= 32)?.id ?? 32;
+        const firstPremium = COLORS.find(c => isPremiumColor(c.id))?.id ?? Object.values(premium_colors)[0];
         showColorDetails(firstPremium);
     } else {
         showColorDetails(CURRENT_SELECTED_COLOR);
@@ -6109,7 +6293,7 @@ checkColorsAll?.addEventListener('click', async () => {
 
         await loadUsersColorState(false);
         try { buildAllColorsPalette(); } catch (_) { }
-        const id = CURRENT_SELECTED_COLOR ?? (COLORS.find(c => c.id >= 32)?.id ?? 32);
+        const id = CURRENT_SELECTED_COLOR ?? (COLORS.find(c => isPremiumColor(c.id))?.id ?? Object.values(premium_colors)[0]);
         showColorDetails(id);
     } catch (e) { handleError(e); }
     finally {
@@ -6128,7 +6312,7 @@ loadColorsCacheBtn?.addEventListener('click', async () => {
     if (usersColorsLastCheckLabel && COLORS_CACHE.ts) usersColorsLastCheckLabel.textContent = new Date(COLORS_CACHE.ts).toLocaleString();
     await loadUsersColorState(true);
     try { buildAllColorsPalette(); } catch (_) { }
-    const id = CURRENT_SELECTED_COLOR ?? (COLORS.find(c => c.id >= 32)?.id ?? 32);
+    const id = CURRENT_SELECTED_COLOR ?? (COLORS.find(c => isPremiumColor(c.id))?.id ?? 32);
     showColorDetails(id);
 });
 
