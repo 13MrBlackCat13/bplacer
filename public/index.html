@@ -66,6 +66,10 @@
                 <img src="icons/manageUsers.svg" alt="" />
                 <span>Manage Users</span>
             </button>
+            <button class="nav-btn" onclick="changeTab(autoRegister)">
+                <img src="icons/addUser.svg" alt="" />
+                <span>Auto Register</span>
+            </button>
             <button class="nav-btn" onclick="document.getElementById('openAddTemplate').click()">
                 <img src="icons/addTemplate.svg" alt="" />
                 <span>Add Template</span>
@@ -150,6 +154,26 @@
                                 </div>
                             </button>
                         </div>
+
+                        <!-- Quick Login Form -->
+                        <div class="form-card" style="margin-top: 20px;">
+                            <h3>Quick Add User by Login</h3>
+                            <p class="hero-sub">Add user by username and password</p>
+                            <form id="dashboardQuickLoginForm" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
+                                <div class="field">
+                                    <label for="dashboardUsername">Username</label>
+                                    <input type="text" id="dashboardUsername" placeholder="Enter username" required />
+                                </div>
+                                <div class="field">
+                                    <label for="dashboardPassword">Password</label>
+                                    <input type="password" id="dashboardPassword" placeholder="Enter password" required />
+                                </div>
+                                <button type="submit" class="primary-button">
+                                    <img src="icons/addUser.svg" alt="" />
+                                    Add User
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </section>
 
@@ -173,14 +197,61 @@
 
                     <form id="userForm" class="form-card" autocomplete="off">
                         <div class="field">
-                            <label for="jcookie">JWT Cookie (j)</label>
-                            <input type="password" id="jcookie" required placeholder="Paste JWT cookie" />
-                            <small class="help">Required. Used for authentication.</small>
+                            <label>Authentication Method</label>
+                            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 5px;">
+                                    <input type="radio" name="authMethod" value="jwt" checked />
+                                    JWT Token
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 5px;">
+                                    <input type="radio" name="authMethod" value="login" />
+                                    Login/Password
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 5px;">
+                                    <input type="radio" name="authMethod" value="register" />
+                                    Register New Account
+                                </label>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label for="scookie">Session Cookie (s) <span class="muted">[optional]</span></label>
-                            <input type="password" id="scookie" placeholder="Paste session cookie" />
-                            <small class="help">Optional. Helps to avoid captcha / login.</small>
+
+                        <div id="jwtFields">
+                            <div class="field">
+                                <label for="jcookie">JWT Cookie (j)</label>
+                                <input type="password" id="jcookie" placeholder="Paste JWT cookie" />
+                                <small class="help">Required for JWT authentication.</small>
+                            </div>
+                        </div>
+
+                        <div id="loginFields" style="display: none;">
+                            <div class="field">
+                                <label for="username">Username</label>
+                                <input type="text" id="username" placeholder="Enter username" />
+                                <small class="help">Your bplace.org username.</small>
+                            </div>
+                            <div class="field">
+                                <label for="password">Password</label>
+                                <input type="password" id="password" placeholder="Enter password" />
+                                <small class="help">Your bplace.org password.</small>
+                            </div>
+                        </div>
+
+                        <div id="registerFields" style="display: none;">
+                            <div class="field">
+                                <label for="regUsername">New Username</label>
+                                <input type="text" id="regUsername" placeholder="Choose username" />
+                                <small class="help">3-20 characters, will be used to create new account.</small>
+                            </div>
+                            <div class="field">
+                                <label for="regPassword">New Password</label>
+                                <input type="password" id="regPassword" placeholder="Choose password" />
+                                <small class="help">At least 6 characters for new account.</small>
+                            </div>
+                            <div style="background: #333; padding: 15px; border-radius: 4px; margin-top: 10px;">
+                                <small style="color: #ff9800;">
+                                    ⚠️ <strong>Note:</strong> Account registration requires captcha solving which is currently handled by the Python autoreg script.
+                                    This feature is experimental and may require additional setup.
+                                </small>
+                            </div>
                         </div>
                         <div class="form-actions">
                             <button type="submit" id="submitUser" class="primary-button">
@@ -239,6 +310,105 @@
                     <div id="userList" class="cards-grid"></div>
 
 
+                </section>
+
+                <!-- ====== AUTO REGISTER ====== -->
+                <section id="autoRegister" style="display:none;">
+                    <header class="section-head">
+                        <h2>Auto Register</h2>
+                        <div class="section-actions">
+                            <button class="primary-button" id="startAutoRegister">
+                                <img src="icons/addUser.svg" alt="" />
+                                Start Registration
+                            </button>
+                        </div>
+                    </header>
+
+                    <!-- Quick Login/Password Form -->
+                    <div class="form-card" style="margin-bottom: 20px;">
+                        <h3>Quick Add by Login/Password</h3>
+                        <form id="quickLoginForm" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
+                            <div class="field">
+                                <label for="quickUsername">Username</label>
+                                <input type="text" id="quickUsername" placeholder="Enter username" required />
+                            </div>
+                            <div class="field">
+                                <label for="quickPassword">Password</label>
+                                <input type="password" id="quickPassword" placeholder="Enter password" required />
+                            </div>
+                            <button type="submit" class="primary-button">
+                                <img src="icons/addUser.svg" alt="" />
+                                Add User
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Auto Registration Settings -->
+                    <div class="form-card">
+                        <h3>Registration Settings</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div>
+                                <div class="field">
+                                    <label for="regCount">Number of Accounts</label>
+                                    <input type="number" id="regCount" min="1" max="100" value="5" />
+                                    <small class="help">How many accounts to register (1-100)</small>
+                                </div>
+
+                                <div class="field">
+                                    <label for="usernameMask">Username Pattern</label>
+                                    <input type="text" id="usernameMask" value="user{####}" placeholder="user{####}" />
+                                    <small class="help">Use {####} for random numbers, {XXXX} for random letters</small>
+                                </div>
+
+                                <div class="field">
+                                    <label for="passwordLength">Password Length</label>
+                                    <input type="number" id="passwordLength" min="6" max="32" value="12" />
+                                    <small class="help">Length of generated passwords (6-32)</small>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div class="field">
+                                    <label for="regThreads">Threads</label>
+                                    <input type="number" id="regThreads" min="1" max="10" value="3" />
+                                    <small class="help">Number of concurrent registration threads</small>
+                                </div>
+
+                                <div class="field">
+                                    <label for="regDelay">Delay Between Requests (ms)</label>
+                                    <input type="number" id="regDelay" min="1000" max="10000" value="3000" />
+                                    <small class="help">Delay between registration attempts</small>
+                                </div>
+
+                                <div class="setting-toggle">
+                                    <label for="autoAddToSystem" class="label-margin0">Auto-add to system</label>
+                                    <label class="switch" class="label-margin0">
+                                        <input id="autoAddToSystem" type="checkbox" checked />
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <small class="help">Automatically add registered accounts to user management</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Registration Status -->
+                    <div class="form-card">
+                        <h3>Registration Status</h3>
+                        <div id="regStatus" style="display: none;">
+                            <div class="progress-bar">
+                                <div id="regProgress" class="progress-fill" style="width: 0%;"></div>
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <span id="regStatusText">Ready to start...</span>
+                            </div>
+                        </div>
+
+                        <div id="regResults" style="margin-top: 15px;">
+                            <h4>Registration Results</h4>
+                            <div id="regResultsList" class="cards-grid"></div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- ====== ADD TEMPLATE ====== -->

@@ -3,7 +3,6 @@ const WPLACE_DOMAIN = "bplace.org";
 const WPLACE_URL = "https://bplace.org/";
 const BACKEND_ORIGIN = "https://backend.bplace.org";
 const COOKIE_NAME = "j";
-const COOKIE_S_NAME = "s";
 
 async function getCookieJ() {
   console.log("[AUTO-LOGIN EXTENSION] getCookieJ: querying cookie", COOKIE_NAME, "for", WPLACE_URL);
@@ -82,7 +81,7 @@ async function getLocalServerUrl(path = '') {
   }
 }
 
-async function sendCookieToLocalServer(jValue, sValue, expirationDate) {
+async function sendCookieToLocalServer(jValue, expirationDate) {
   try {
     const url = await getLocalServerUrl('/user');
     const meta = await (async () => {
@@ -92,7 +91,6 @@ async function sendCookieToLocalServer(jValue, sValue, expirationDate) {
       } catch { return { profileName: null, profilePath: null }; }
     })();
     const body = { cookies: { j: jValue }, expirationDate, ...meta };
-    if (sValue) body.cookies.s = sValue;
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return res.status;
   } catch (e) {
@@ -108,8 +106,7 @@ async function sendTokenToServer(tabId, token, expirationDate) {
   if (!token) return 0;
   let status = 0;
   try {
-    const s = await new Promise(r => chrome.cookies.get({ url: BACKEND_ORIGIN + '/', name: COOKIE_S_NAME }, c => r(c||null)));
-    status = await sendCookieToLocalServer(token, s?.value || null, expirationDate || null);
+    status = await sendCookieToLocalServer(token, expirationDate || null);
     try { chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: (st, tk) => { try { console.log('[J TOKEN SEND]', st, tk ? tk.slice(0,16)+'…' : '') } catch {} }, args: [`status=${status}`, String(token)] }); } catch {}
   } catch (e) {
     try { chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: (m) => { try { console.log('[J TOKEN SEND ERROR]', m); } catch {} }, args: [String(e?.message||'ERR')] }); } catch {}

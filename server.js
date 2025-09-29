@@ -530,6 +530,9 @@ const ChargeCache = {
     u.base = newCount;
     u.lastSync = now - ((now - u.lastSync) % this.REGEN_MS);
     this._m.set(k, u);
+  },
+  clearAll() {
+    this._m.clear();
   }
 };
 
@@ -2879,8 +2882,7 @@ app.use((err, req, res, next) => {
 // Global storage for manual cookies
 let manualCookies = {
   j: null,
-  cf_clearance: null,
-  s: null  // Alternative name for cf_clearance that some users might use
+  cf_clearance: null
 };
 
 // Auto cf token retrieval settings
@@ -2953,6 +2955,23 @@ async function autoGetCfTokenIfNeeded() {
       console.log('✅ Successfully auto-retrieved cf_clearance token');
       autoTokenSettings.isRetrying = false;
 
+      // Interrupt all running template managers to immediately retry with new token
+      try {
+        let interruptedCount = 0;
+        for (const templateId in templates) {
+          const manager = templates[templateId];
+          if (manager && manager.running && typeof manager.interruptSleep === 'function') {
+            manager.interruptSleep();
+            interruptedCount++;
+          }
+        }
+        if (interruptedCount > 0) {
+          console.log(`🔄 Interrupted ${interruptedCount} running template(s) to retry with new cf_clearance token`);
+        }
+      } catch (error) {
+        console.log('⚠️ Error interrupting templates:', error.message);
+      }
+
       // Notify browser extension about token update
       try {
         // Find any bplace.org tabs and send a refresh notification
@@ -2972,6 +2991,37 @@ async function autoGetCfTokenIfNeeded() {
 
   autoTokenSettings.isRetrying = false;
   return null;
+}
+
+// Centralized function to auto-get token and interrupt running templates
+async function autoGetCfTokenAndInterruptQueues() {
+  const newToken = await autoGetCfTokenIfNeeded();
+
+  if (newToken) {
+    // Token was updated, clear charge cache and interrupt all running template managers
+    try {
+      // Clear charge cache to force fresh user status checks
+      ChargeCache.clearAll();
+      console.log('🗑️ Cleared charge cache due to cf_clearance token update');
+
+      // Interrupt all running template managers to immediately retry
+      let interruptedCount = 0;
+      for (const templateId in templates) {
+        const manager = templates[templateId];
+        if (manager && manager.running && typeof manager.interruptSleep === 'function') {
+          manager.interruptSleep();
+          interruptedCount++;
+        }
+      }
+      if (interruptedCount > 0) {
+        console.log(`🔄 Interrupted ${interruptedCount} running template(s) due to token update`);
+      }
+    } catch (error) {
+      console.log('⚠️ Error interrupting templates:', error.message);
+    }
+  }
+
+  return newToken;
 }
 
 // Periodic check for token validity (every 10 minutes)
@@ -2995,13 +3045,13 @@ setInterval(async () => {
     const isValid = await isCfTokenValid(currentToken);
     if (!isValid) {
       console.log('🕐 [PERIODIC] cf_clearance token expired, attempting auto-refresh...');
-      await autoGetCfTokenIfNeeded();
+      await autoGetCfTokenAndInterruptQueues();
     } else {
       console.log('🕐 [PERIODIC] cf_clearance token is still valid');
     }
   } else {
     console.log('🕐 [PERIODIC] No cf_clearance token found, attempting auto-retrieval...');
-    await autoGetCfTokenIfNeeded();
+    await autoGetCfTokenAndInterruptQueues();
   }
 }, 10 * 60 * 1000); // 10 minutes
 
@@ -3848,20 +3898,332 @@ app.get("/users", (_, res) => {
   res.json(out);
 });
 
+// Function to register a new account on bplace.org
+async function registerAccount(username, password) {
+  console.log(`📝 [REGISTER] Attempting to register account: ${username}`);
+
+  try {
+    // Get cf_clearance token
+    let clearanceCookie = manualCookies.cf_clearance;
+    if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
+      console.log('🤖 Getting cf_clearance token for registration...');
+      const autoToken = await autoGetCfTokenAndInterruptQueues();
+      if (autoToken) {
+        clearanceCookie = autoToken;
+      }
+    }
+
+    if (!clearanceCookie) {
+      throw new Error("Unable to get cf_clearance token for registration");
+    }
+
+    // Create MockImpit instance for registration
+    const jar = new CookieJar();
+    jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+
+    const browser = new MockImpit({
+      cookieJar: jar,
+      browser: "chrome",
+      ignoreTlsErrors: true,
+      userId: `register_${Date.now()}` // Temporary userId for registration attempt
+    });
+
+    // First, get the register page
+    console.log(`📝 [REGISTER] Getting register page...`);
+    const registerPageResponse = await browser.fetch('https://bplace.org/register');
+
+    if (registerPageResponse.status !== 200) {
+      throw new Error(`Failed to load register page: ${registerPageResponse.status}`);
+    }
+
+    // For now, we'll skip captcha solving and assume it's handled by the autoreg Python script
+    // In a real implementation, you'd need to integrate the captcha solving API
+    console.log(`📝 [REGISTER] Registration requires captcha solving - this should be implemented`);
+
+    // Prepare registration data
+    const registrationData = new URLSearchParams({
+      username: username,
+      password: password,
+      confirm: password,
+      // 'cf-turnstile-response': captchaToken // This would need to be solved
+    });
+
+    // Submit registration form
+    console.log(`📝 [REGISTER] Submitting registration form...`);
+    const registerResponse = await browser.fetch('https://bplace.org/account/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://bplace.org/register',
+        'Origin': 'https://bplace.org',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      body: registrationData.toString(),
+      redirect: 'manual'
+    });
+
+    console.log(`📝 [REGISTER] Registration response status: ${registerResponse.status}`);
+
+    // Check for successful registration
+    if (registerResponse.status === 302 || registerResponse.status === 301) {
+      // Registration successful, extract JWT token from cookies
+      const setCookieHeaders = registerResponse.headers.get('set-cookie') || registerResponse.headers.get('Set-Cookie');
+
+      if (setCookieHeaders) {
+        console.log(`📝 [REGISTER] Set-Cookie headers:`, setCookieHeaders);
+
+        const cookieStrings = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+
+        for (const cookieString of cookieStrings) {
+          if (cookieString.includes('j=')) {
+            const jCookieMatch = cookieString.match(/j=([^;]+)/);
+            if (jCookieMatch) {
+              const jwtToken = jCookieMatch[1];
+              console.log(`📝 [REGISTER] Registration successful, JWT token obtained: ${jwtToken.substring(0, 50)}...`);
+
+              return {
+                success: true,
+                username: username,
+                cookies: {
+                  j: jwtToken,
+                  cf_clearance: clearanceCookie
+                }
+              };
+            }
+          }
+        }
+      }
+
+      // Try to get from cookie jar if not in headers
+      try {
+        const cookies = jar.getCookiesSync('https://bplace.org');
+        for (const cookie of cookies) {
+          if (cookie.key === 'j') {
+            console.log(`📝 [REGISTER] Registration successful, JWT token from jar: ${cookie.value.substring(0, 50)}...`);
+            return {
+              success: true,
+              username: username,
+              cookies: {
+                j: cookie.value,
+                cf_clearance: clearanceCookie
+              }
+            };
+          }
+        }
+      } catch (err) {
+        console.log(`📝 [REGISTER] Could not extract from cookie jar: ${err.message}`);
+      }
+    }
+
+    // Check response for error messages
+    const responseText = await registerResponse.text();
+    console.log(`📝 [REGISTER] Response body:`, responseText.substring(0, 500));
+
+    if (responseText.includes('Username already exists') ||
+        responseText.includes('already taken') ||
+        responseText.includes('already in use')) {
+      throw new Error("Username already exists");
+    }
+
+    if (responseText.includes('Invalid captcha') ||
+        responseText.includes('captcha')) {
+      throw new Error("Captcha solving required - not implemented");
+    }
+
+    if (responseText.includes('Invalid username') ||
+        responseText.includes('Invalid password')) {
+      throw new Error("Invalid username or password format");
+    }
+
+    throw new Error(`Registration failed with status ${registerResponse.status}`);
+
+  } catch (error) {
+    console.log(`📝 [REGISTER] Registration failed for ${username}: ${error.message}`);
+    throw error;
+  }
+}
+
+// Function to refresh JWT token using saved credentials
+async function refreshUserToken(userId) {
+  const user = users[userId];
+  if (!user || !user.credentials) {
+    throw new Error("No saved credentials for user");
+  }
+
+  console.log(`🔄 [REFRESH] Refreshing token for user ${user.name} (${userId})`);
+
+  try {
+    const newCookies = await loginWithCredentials(user.credentials.username, user.credentials.password);
+
+    // Update user cookies
+    users[userId].cookies = newCookies;
+    users[userId].expirationDate = getJwtExp(newCookies.j);
+    saveUsers();
+
+    console.log(`🔄 [REFRESH] Token refreshed successfully for user ${user.name} (${userId})`);
+    return newCookies;
+  } catch (error) {
+    console.log(`🔄 [REFRESH] Failed to refresh token for user ${user.name} (${userId}): ${error.message}`);
+    throw error;
+  }
+}
+
+// Function to login with username/password and get JWT token
+async function loginWithCredentials(username, password) {
+  console.log(`🔐 [LOGIN] Attempting to login with username: ${username}`);
+
+  try {
+    // Get cf_clearance token
+    let clearanceCookie = manualCookies.cf_clearance;
+    if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
+      console.log('🤖 Getting cf_clearance token for login...');
+      const autoToken = await autoGetCfTokenAndInterruptQueues();
+      if (autoToken) {
+        clearanceCookie = autoToken;
+      }
+    }
+
+    if (!clearanceCookie) {
+      throw new Error("Unable to get cf_clearance token for login");
+    }
+
+    // Create MockImpit instance for login
+    const jar = new CookieJar();
+    jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+
+    const browser = new MockImpit({
+      cookieJar: jar,
+      browser: "chrome",
+      ignoreTlsErrors: true,
+      userId: `login_${Date.now()}` // Temporary userId for login attempt
+    });
+
+    // First, get the login page to check for any CSRF tokens or required fields
+    console.log(`🔐 [LOGIN] Getting login page...`);
+    const loginPageResponse = await browser.fetch('https://bplace.org/login');
+
+    if (loginPageResponse.status !== 200) {
+      throw new Error(`Failed to load login page: ${loginPageResponse.status}`);
+    }
+
+    // Prepare login data
+    const loginData = new URLSearchParams({
+      username: username,
+      password: password
+    });
+
+    // Submit login form to the correct endpoint
+    console.log(`🔐 [LOGIN] Submitting login form...`);
+    const loginResponse = await browser.fetch('https://bplace.org/account/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://bplace.org/login',
+        'Origin': 'https://bplace.org',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      body: loginData.toString(),
+      redirect: 'manual'
+    });
+
+    // Check for successful login (usually a redirect)
+    if (loginResponse.status === 302 || loginResponse.status === 301) {
+      // Login successful, extract JWT token from cookies
+      const setCookieHeaders = loginResponse.headers.get('set-cookie') || loginResponse.headers.get('Set-Cookie');
+
+      if (setCookieHeaders) {
+        console.log(`🔐 [LOGIN] Set-Cookie headers:`, setCookieHeaders);
+
+        // Handle both single string and array of cookies
+        const cookieStrings = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+
+        for (const cookieString of cookieStrings) {
+          if (cookieString.includes('j=')) {
+            const jCookieMatch = cookieString.match(/j=([^;]+)/);
+            if (jCookieMatch) {
+              const jwtToken = jCookieMatch[1];
+              console.log(`🔐 [LOGIN] Login successful, JWT token obtained: ${jwtToken.substring(0, 50)}...`);
+
+              return {
+                j: jwtToken,
+                cf_clearance: clearanceCookie
+              };
+            }
+          }
+        }
+      }
+
+      // If no JWT found in headers, try to get from cookie jar
+      try {
+        const cookies = jar.getCookiesSync('https://bplace.org');
+        for (const cookie of cookies) {
+          if (cookie.key === 'j') {
+            console.log(`🔐 [LOGIN] Login successful, JWT token from jar: ${cookie.value.substring(0, 50)}...`);
+            return {
+              j: cookie.value,
+              cf_clearance: clearanceCookie
+            };
+          }
+        }
+      } catch (err) {
+        console.log(`🔐 [LOGIN] Could not extract from cookie jar: ${err.message}`);
+      }
+    }
+
+    // Check response for error messages
+    const responseText = await loginResponse.text();
+    if (responseText.includes('Invalid username or password') ||
+        responseText.includes('Login failed') ||
+        responseText.includes('error')) {
+      throw new Error("Invalid username or password");
+    }
+
+    throw new Error(`Login failed with status ${loginResponse.status}`);
+
+  } catch (error) {
+    console.log(`🔐 [LOGIN] Login failed for ${username}: ${error.message}`);
+    throw error;
+  }
+}
+
 app.post("/user", async (req, res) => {
   console.log(`🔥 [DEBUG] POST /user received`);
   console.log(`🔥 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
 
-  // Use manual cookies if no cookies provided in request
   let cookiesToUse = req.body.cookies;
+  let credentials = req.body.credentials;
 
+  // Handle login with username/password
+  if (credentials && credentials.username && credentials.password) {
+    try {
+      console.log(`🔐 [LOGIN] Login attempt with credentials for: ${credentials.username}`);
+      cookiesToUse = await loginWithCredentials(credentials.username, credentials.password);
+    } catch (error) {
+      console.log(`🔐 [LOGIN] Login failed: ${error.message}`);
+      return res.status(401).json({
+        error: `Login failed: ${error.message}`
+      });
+    }
+  }
+
+  // Use manual cookies if no cookies provided in request
   if (!cookiesToUse || !cookiesToUse.j) {
     // Try to auto-get cf_clearance token if needed
-    let clearanceCookie = manualCookies.cf_clearance || manualCookies.s;
+    let clearanceCookie = manualCookies.cf_clearance;
 
     if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
       console.log('🤖 Attempting to auto-retrieve cf_clearance token...');
-      const autoToken = await autoGetCfTokenIfNeeded();
+      const autoToken = await autoGetCfTokenAndInterruptQueues();
       if (autoToken) {
         clearanceCookie = autoToken;
       }
@@ -3871,8 +4233,7 @@ app.post("/user", async (req, res) => {
       console.log(`🍪 [MANUAL] No cookies in request, using manual cookies`);
       cookiesToUse = {
         j: manualCookies.j,
-        cf_clearance: clearanceCookie,
-        s: clearanceCookie  // Include both names for compatibility
+        cf_clearance: clearanceCookie
       };
     } else if (!manualCookies.j) {
       console.log(`❌ [ERROR] No j cookie available. Please login manually first.`);
@@ -3884,13 +4245,6 @@ app.post("/user", async (req, res) => {
       return res.status(400).json({
         error: "No valid cf_clearance token available. Auto-retrieval failed. Please try manual input at /manual-cookies"
       });
-    }
-  } else {
-    // If cookies provided, ensure both cf_clearance and s are available for compatibility
-    if (cookiesToUse.s && !cookiesToUse.cf_clearance) {
-      cookiesToUse.cf_clearance = cookiesToUse.s;
-    } else if (cookiesToUse.cf_clearance && !cookiesToUse.s) {
-      cookiesToUse.s = cookiesToUse.cf_clearance;
     }
   }
 
@@ -3910,6 +4264,14 @@ app.post("/user", async (req, res) => {
     };
     if (shortLabelFromProfile) {
       users[userInfo.id].shortLabel = shortLabelFromProfile;
+    }
+    // Save credentials if they were used for login
+    if (credentials && credentials.username && credentials.password) {
+      users[userInfo.id].credentials = {
+        username: credentials.username,
+        password: credentials.password
+      };
+      console.log(`🔐 [LOGIN] Saved credentials for user ${userInfo.name} (${userInfo.id})`);
     }
     saveUsers();
     res.json(userInfo);
@@ -4058,6 +4420,68 @@ app.post("/users/cleanup-expired", (req, res) => {
     }
   } catch (e) {
     return res.status(500).json({ error: String(e && e.message || e) });
+  }
+});
+
+// --- API: update user credentials ---
+app.put("/user/:id/update-credentials", async (req, res) => {
+  const { id } = req.params;
+  const { username, password } = req.body || {};
+
+  if (!users[id]) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  try {
+    // Update credentials
+    users[id].credentials = { username, password };
+    saveUsers();
+
+    console.log(`🔐 [UPDATE] Updated credentials for user ${users[id].name} (${id})`);
+
+    res.json({ success: true, message: "Credentials updated successfully" });
+  } catch (error) {
+    console.error(`Failed to update credentials for user ${id}:`, error.message);
+    res.status(500).json({ error: "Failed to update credentials" });
+  }
+});
+
+// --- API: update user JWT token ---
+app.put("/user/:id/update-jwt", async (req, res) => {
+  const { id } = req.params;
+  const { jwtToken } = req.body || {};
+
+  if (!users[id]) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!jwtToken || !jwtToken.startsWith('eyJ')) {
+    return res.status(400).json({ error: "Valid JWT token is required" });
+  }
+
+  try {
+    // Update JWT token
+    users[id].cookies = users[id].cookies || {};
+    users[id].cookies.j = jwtToken;
+
+    // Update expiration date from JWT
+    const exp = getJwtExp(jwtToken);
+    if (exp) {
+      users[id].expirationDate = exp;
+    }
+
+    saveUsers();
+
+    console.log(`🔐 [UPDATE] Updated JWT token for user ${users[id].name} (${id})`);
+
+    res.json({ success: true, message: "JWT token updated successfully" });
+  } catch (error) {
+    console.error(`Failed to update JWT token for user ${id}:`, error.message);
+    res.status(500).json({ error: "Failed to update JWT token" });
   }
 });
 
@@ -4249,6 +4673,161 @@ app.post("/user/:id/alliance/leave", async (req, res) => {
     res.status(500).json({ error: error.message });
   } finally {
     activeBrowserUsers.delete(id);
+  }
+});
+
+// --- API: refresh user JWT token using saved credentials ---
+app.post("/user/:id/refresh-token", async (req, res) => {
+  const { id } = req.params;
+
+  if (!users[id]) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!users[id].credentials) {
+    return res.status(400).json({ error: "No saved credentials for this user" });
+  }
+
+  if (activeBrowserUsers.has(id)) {
+    return res.status(409).json({ error: "User is currently active in another operation" });
+  }
+
+  activeBrowserUsers.add(id);
+
+  try {
+    await refreshUserToken(id);
+    res.json({
+      success: true,
+      message: `Token refreshed successfully for ${users[id].name}`,
+      expirationDate: users[id].expirationDate
+    });
+  } catch (error) {
+    console.error(`Failed to refresh token for user ${id}:`, error.message);
+    res.status(500).json({ error: `Failed to refresh token: ${error.message}` });
+  } finally {
+    activeBrowserUsers.delete(id);
+  }
+});
+
+// --- API: refresh tokens for all users with saved credentials ---
+app.post("/users/refresh-tokens", async (req, res) => {
+  const usersWithCredentials = Object.keys(users).filter(id => users[id].credentials);
+
+  if (usersWithCredentials.length === 0) {
+    return res.json({ message: "No users with saved credentials found", refreshed: 0, failed: 0 });
+  }
+
+  let refreshed = 0;
+  let failed = 0;
+  const results = [];
+
+  for (const userId of usersWithCredentials) {
+    if (activeBrowserUsers.has(userId)) {
+      results.push({ userId, name: users[userId].name, status: "skipped", reason: "User busy" });
+      continue;
+    }
+
+    activeBrowserUsers.add(userId);
+
+    try {
+      await refreshUserToken(userId);
+      refreshed++;
+      results.push({
+        userId,
+        name: users[userId].name,
+        status: "success",
+        expirationDate: users[userId].expirationDate
+      });
+    } catch (error) {
+      failed++;
+      results.push({
+        userId,
+        name: users[userId].name,
+        status: "failed",
+        error: error.message
+      });
+    } finally {
+      activeBrowserUsers.delete(userId);
+    }
+
+    // Small delay between requests to avoid overwhelming the server
+    if (userId !== usersWithCredentials[usersWithCredentials.length - 1]) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  res.json({
+    message: `Token refresh completed`,
+    total: usersWithCredentials.length,
+    refreshed,
+    failed,
+    results
+  });
+});
+
+// --- API: register new account ---
+app.post("/user/register", async (req, res) => {
+  const { username, password } = req.body || {};
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  if (username.length < 3 || username.length > 20) {
+    return res.status(400).json({ error: "Username must be between 3 and 20 characters" });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+
+  try {
+    console.log(`📝 [REGISTER API] Registration request for: ${username}`);
+
+    const result = await registerAccount(username, password);
+
+    if (result.success) {
+      // Register the account in our system using the obtained JWT token
+      const wplacer = new WPlacer();
+      const userInfo = await wplacer.login(result.cookies);
+      const exp = getJwtExp(result.cookies.j);
+
+      const prev = users[userInfo.id] || {};
+      users[userInfo.id] = {
+        ...prev,
+        name: userInfo.name,
+        cookies: result.cookies,
+        expirationDate: exp || prev?.expirationDate || null,
+        credentials: {
+          username: username,
+          password: password
+        }
+      };
+
+      saveUsers();
+
+      console.log(`📝 [REGISTER API] Successfully registered and added user ${userInfo.name} (${userInfo.id})`);
+
+      res.json({
+        success: true,
+        message: `Account ${username} registered successfully`,
+        userInfo: userInfo
+      });
+    } else {
+      res.status(500).json({ error: "Registration failed" });
+    }
+  } catch (error) {
+    console.error(`📝 [REGISTER API] Registration failed for ${username}:`, error.message);
+
+    if (error.message.includes("Username already exists")) {
+      res.status(409).json({ error: "Username already exists" });
+    } else if (error.message.includes("Captcha solving required")) {
+      res.status(501).json({ error: "Captcha solving not implemented yet" });
+    } else if (error.message.includes("Invalid username or password format")) {
+      res.status(400).json({ error: "Invalid username or password format" });
+    } else {
+      res.status(500).json({ error: `Registration failed: ${error.message}` });
+    }
   }
 });
 
@@ -5663,7 +6242,7 @@ app.get("/canvas", async (req, res) => {
 
       if (!(await isCfTokenValid(clearanceCookie))) {
         console.log('🤖 [TILES] cf_clearance token invalid, attempting auto-refresh...');
-        const autoToken = await autoGetCfTokenIfNeeded();
+        const autoToken = await autoGetCfTokenAndInterruptQueues();
         if (autoToken) {
           clearanceCookie = autoToken;
         }

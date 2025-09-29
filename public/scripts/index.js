@@ -21,9 +21,36 @@ const openManageTemplates = $("openManageTemplates");
 const openSettings = $("openSettings");
 const openChangelog = $("openChangelog");
 const userForm = $("userForm");
-const scookie = $("scookie");
 const jcookie = $("jcookie");
+const username = $("username");
+const password = $("password");
+const regUsername = $("regUsername");
+const regPassword = $("regPassword");
+const jwtFields = $("jwtFields");
+const loginFields = $("loginFields");
+const registerFields = $("registerFields");
 const submitUser = $("submitUser");
+
+// Auto registration elements
+const quickLoginForm = $("quickLoginForm");
+const quickUsername = $("quickUsername");
+const quickPassword = $("quickPassword");
+
+// Dashboard quick login elements
+const dashboardQuickLoginForm = $("dashboardQuickLoginForm");
+const dashboardUsername = $("dashboardUsername");
+const dashboardPassword = $("dashboardPassword");
+const startAutoRegister = $("startAutoRegister");
+const regCount = $("regCount");
+const usernameMask = $("usernameMask");
+const passwordLength = $("passwordLength");
+const regThreads = $("regThreads");
+const regDelay = $("regDelay");
+const autoAddToSystem = $("autoAddToSystem");
+const regStatus = $("regStatus");
+const regProgress = $("regProgress");
+const regStatusText = $("regStatusText");
+const regResultsList = $("regResultsList");
 const manageUsers = $("manageUsers");
 const userList = $("userList");
 const checkUserStatus = $("checkUserStatus");
@@ -613,13 +640,100 @@ const loadUsers = async (f) => {
         handleError(error);
     };
 };
+// Auth method switching logic
+document.querySelectorAll('input[name="authMethod"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        const method = e.target.value;
+
+        // Hide all fields first
+        jwtFields.style.display = 'none';
+        loginFields.style.display = 'none';
+        registerFields.style.display = 'none';
+
+        // Reset all required fields
+        jcookie.required = false;
+        username.required = false;
+        password.required = false;
+        regUsername.required = false;
+        regPassword.required = false;
+
+        if (method === 'jwt') {
+            jwtFields.style.display = 'block';
+            jcookie.required = true;
+        } else if (method === 'login') {
+            loginFields.style.display = 'block';
+            username.required = true;
+            password.required = true;
+        } else if (method === 'register') {
+            registerFields.style.display = 'block';
+            regUsername.required = true;
+            regPassword.required = true;
+        }
+    });
+});
+
 userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-        const response = await axios.post('/user', { cookies: { s: scookie.value, j: jcookie.value } });
+        const authMethod = document.querySelector('input[name="authMethod"]:checked').value;
+
+        let requestData;
+        let endpoint = '/user';
+
+        if (authMethod === 'jwt') {
+            if (!jcookie.value.trim()) {
+                showMessage("Error", "JWT cookie is required!");
+                return;
+            }
+            requestData = { cookies: { j: jcookie.value } };
+        } else if (authMethod === 'login') {
+            if (!username.value.trim() || !password.value.trim()) {
+                showMessage("Error", "Username and password are required!");
+                return;
+            }
+            requestData = {
+                credentials: {
+                    username: username.value.trim(),
+                    password: password.value.trim()
+                }
+            };
+        } else if (authMethod === 'register') {
+            if (!regUsername.value.trim() || !regPassword.value.trim()) {
+                showMessage("Error", "Username and password are required for registration!");
+                return;
+            }
+
+            if (regUsername.value.trim().length < 3 || regUsername.value.trim().length > 20) {
+                showMessage("Error", "Username must be between 3 and 20 characters!");
+                return;
+            }
+
+            if (regPassword.value.trim().length < 6) {
+                showMessage("Error", "Password must be at least 6 characters!");
+                return;
+            }
+
+            requestData = {
+                username: regUsername.value.trim(),
+                password: regPassword.value.trim()
+            };
+            endpoint = '/user/register';
+        }
+
+        const response = await axios.post(endpoint, requestData);
         if (response.status === 200) {
-            showMessage("Success", `Logged in as ${response.data.name} (#${response.data.id})!`);
+            if (authMethod === 'register') {
+                showMessage("Success", `Account registered and added successfully: ${response.data.userInfo.name} (#${response.data.userInfo.id})!`);
+            } else {
+                showMessage("Success", `Logged in as ${response.data.name} (#${response.data.id})!`);
+            }
             userForm.reset();
+            // Reset radio button to JWT by default
+            document.querySelector('input[name="authMethod"][value="jwt"]').checked = true;
+            jwtFields.style.display = 'block';
+            loginFields.style.display = 'none';
+            registerFields.style.display = 'none';
+            jcookie.required = true;
             openManageUsers.click();
         }
     } catch (error) {
@@ -2795,6 +2909,32 @@ openManageUsers.addEventListener("click", async () => {
                         <div class="form-actions" style="${allianceIdInit && allianceIdInit !== '–' ? '' : 'display:none'}">
                             <button type="button" id="edit-alliance-leave-${id}" class="secondary-button"><img src="icons/remove.svg" alt=""/>Leave</button>
                         </div>
+                    </div>
+                    <div class="form-card" style="text-align:left; margin-top:8px;">
+                        <div class="settings-card-head">
+                            <h3 class="settings-card-title">Authentication</h3>
+                            <p class="settings-card-sub">Login credentials and JWT token</p>
+                        </div>
+                        <div class="field">
+                            <label for="edit-username-${id}">Username</label>
+                            <input id="edit-username-${id}" type="text" placeholder="bplace.org username" value="${(users[id].credentials?.username || '').replace(/"/g, '&quot;')}" />
+                            <small class="help">Used for automatic token refresh</small>
+                        </div>
+                        <div class="field">
+                            <label for="edit-password-${id}">Password</label>
+                            <input id="edit-password-${id}" type="password" placeholder="bplace.org password" value="${(users[id].credentials?.password || '').replace(/"/g, '&quot;')}" />
+                            <small class="help">Used for automatic token refresh</small>
+                        </div>
+                        <div class="field">
+                            <label for="edit-jwt-${id}">JWT Token (j cookie)</label>
+                            <textarea id="edit-jwt-${id}" placeholder="Manual JWT token override" style="min-height: 80px; font-family: monospace; font-size: 12px;">${(users[id].cookies?.j || '').replace(/"/g, '&quot;')}</textarea>
+                            <small class="help">Override current JWT token manually if needed</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="edit-refresh-token-${id}" class="secondary-button">
+                                <img src="icons/restart.svg" alt=""/>Refresh Token
+                            </button>
+                        </div>
                     </div>`;
 
                 showConfirmationBig('Edit Account', content, async () => {
@@ -2802,14 +2942,55 @@ openManageUsers.addEventListener("click", async () => {
                     const shortLabelEl = document.getElementById(`edit-shortLabel-${id}`);
                     const discordEl = document.getElementById(`edit-discord-${id}`);
                     const showEl = document.getElementById(`edit-showLastPixel-${id}`);
+                    const usernameEl = document.getElementById(`edit-username-${id}`);
+                    const passwordEl = document.getElementById(`edit-password-${id}`);
+                    const jwtEl = document.getElementById(`edit-jwt-${id}`);
+
                     const name = (nameEl?.value || '').trim().slice(0, 15);
                     const shortLabel = (shortLabelEl?.value || '').trim().slice(0, 40);
                     const discord = (discordEl?.value || '').trim().slice(0, 15);
                     const showLastPixel = !!showEl?.checked;
+                    const username = (usernameEl?.value || '').trim();
+                    const password = (passwordEl?.value || '').trim();
+                    const jwtToken = (jwtEl?.value || '').trim();
+
                     if (name.length < 2) { showMessage('Error', 'Name must be at least 2 characters.'); return; }
+
                     try {
+                        // First, update profile data
                         const payload = { name, discord, showLastPixel, shortLabel };
                         const resp = await axios.put(`/user/${id}/update-profile`, payload);
+
+                        // Then, update authentication data if provided
+                        let authUpdated = false;
+                        if (username && password) {
+                            try {
+                                const authPayload = { username, password };
+                                const authResp = await axios.put(`/user/${id}/update-credentials`, authPayload);
+                                if (authResp.status === 200) {
+                                    authUpdated = true;
+                                    users[id].credentials = { username, password };
+                                }
+                            } catch (authError) {
+                                console.warn('Failed to update credentials:', authError);
+                            }
+                        }
+
+                        // Update JWT token manually if provided
+                        if (jwtToken && jwtToken.startsWith('eyJ')) {
+                            try {
+                                const jwtPayload = { jwtToken };
+                                const jwtResp = await axios.put(`/user/${id}/update-jwt`, jwtPayload);
+                                if (jwtResp.status === 200) {
+                                    authUpdated = true;
+                                    users[id].cookies = users[id].cookies || {};
+                                    users[id].cookies.j = jwtToken;
+                                }
+                            } catch (jwtError) {
+                                console.warn('Failed to update JWT token:', jwtError);
+                            }
+                        }
+
                         if (resp.status === 200 && resp.data?.success) {
                             // Update username + short label inline
                             const usernameEl = user.querySelector('.user-info-username');
@@ -2820,7 +3001,8 @@ openManageUsers.addEventListener("click", async () => {
                             users[id].discord = discord;
                             users[id].showLastPixel = showLastPixel;
                             closeMessageBox();
-                            showMessage('Success', 'Profile updated.');
+                            const successMsg = authUpdated ? 'Profile and authentication data updated.' : 'Profile updated.';
+                            showMessage('Success', successMsg);
                         } else {
                             handleError({ response: { data: resp.data, status: resp.status } });
                         }
@@ -2829,6 +3011,36 @@ openManageUsers.addEventListener("click", async () => {
                     }
                 });
                 if (typeof messageBoxConfirmBig !== 'undefined' && messageBoxConfirmBig) messageBoxConfirmBig.textContent = 'Save';
+
+                // Refresh Token button handler
+                const refreshTokenBtn = document.getElementById(`edit-refresh-token-${id}`);
+                refreshTokenBtn?.addEventListener('click', async () => {
+                    if (!users[id].credentials || !users[id].credentials.username || !users[id].credentials.password) {
+                        showMessage('Error', 'No saved credentials found. Please enter username and password first.');
+                        return;
+                    }
+
+                    try {
+                        refreshTokenBtn.disabled = true;
+                        refreshTokenBtn.innerHTML = '<img src="icons/restart.svg" alt=""/>Refreshing...';
+
+                        const resp = await axios.post(`/user/${id}/refresh-token`);
+                        if (resp.status === 200) {
+                            showMessage('Success', 'Token refreshed successfully!');
+
+                            // Update JWT field with new token
+                            const jwtEl = document.getElementById(`edit-jwt-${id}`);
+                            if (jwtEl && resp.data.newToken) {
+                                jwtEl.value = resp.data.newToken;
+                            }
+                        }
+                    } catch (error) {
+                        handleError(error);
+                    } finally {
+                        refreshTokenBtn.disabled = false;
+                        refreshTokenBtn.innerHTML = '<img src="icons/restart.svg" alt=""/>Refresh Token';
+                    }
+                });
 
                 const joinBtn = document.getElementById(`edit-alliance-join-${id}`);
                 const leaveBtn = document.getElementById(`edit-alliance-leave-${id}`);
@@ -6734,5 +6946,211 @@ hideSensitiveInfoQueue.addEventListener('change', () => {
     saveQueueSettings();
     if (currentQueueData && currentQueueData.users) {
         updateQueueUserList(currentQueueData.users);
+    }
+});
+
+// ====== AUTO REGISTRATION FUNCTIONALITY ======
+
+// Quick login form handler
+quickLoginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        const username = quickUsername.value.trim();
+        const password = quickPassword.value.trim();
+
+        if (!username || !password) {
+            showMessage("Error", "Username and password are required!");
+            return;
+        }
+
+        const response = await axios.post('/user', {
+            credentials: { username, password }
+        });
+
+        if (response.status === 200) {
+            showMessage("Success", `User ${response.data.name} (#${response.data.id}) added successfully!`);
+            quickLoginForm.reset();
+            // Refresh manage users if it's open
+            if (manageUsers.style.display !== 'none') {
+                loadUsers();
+            }
+        }
+    } catch (error) {
+        handleError(error);
+    }
+});
+
+// Dashboard quick login form handler
+dashboardQuickLoginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        const username = dashboardUsername.value.trim();
+        const password = dashboardPassword.value.trim();
+
+        if (!username || !password) {
+            showMessage("Error", "Username and password are required!");
+            return;
+        }
+
+        const response = await axios.post('/user', {
+            credentials: { username, password }
+        });
+
+        if (response.status === 200) {
+            showMessage("Success", `User ${response.data.name} (#${response.data.id}) added successfully!`);
+            dashboardQuickLoginForm.reset();
+            // Refresh manage users if it's open
+            if (manageUsers.style.display !== 'none') {
+                loadUsers();
+            }
+        }
+    } catch (error) {
+        handleError(error);
+    }
+});
+
+// Generate username based on pattern
+function generateUsername(pattern) {
+    return pattern.replace(/\{####\}/g, () => {
+        return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    }).replace(/\{XXXX\}/g, () => {
+        const chars = 'abcdefghijklmnopqrstuvwxyz';
+        return Array.from({length: 4}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    }).replace(/\{###\}/g, () => {
+        return Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    }).replace(/\{XX\}/g, () => {
+        const chars = 'abcdefghijklmnopqrstuvwxyz';
+        return Array.from({length: 2}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    });
+}
+
+// Generate random password
+function generatePassword(length) {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return Array.from({length}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+// Auto registration handler
+startAutoRegister.addEventListener('click', async () => {
+    const count = parseInt(regCount.value);
+    const pattern = usernameMask.value;
+    const passLength = parseInt(passwordLength.value);
+    const delay = parseInt(regDelay.value);
+    const autoAdd = autoAddToSystem.checked;
+
+    if (count < 1 || count > 100) {
+        showMessage("Error", "Number of accounts must be between 1 and 100!");
+        return;
+    }
+
+    if (!pattern || !pattern.includes('{')) {
+        showMessage("Error", "Username pattern must contain placeholders like {####}!");
+        return;
+    }
+
+    if (passLength < 6 || passLength > 32) {
+        showMessage("Error", "Password length must be between 6 and 32!");
+        return;
+    }
+
+    // Show status and disable button
+    regStatus.style.display = 'block';
+    startAutoRegister.disabled = true;
+    regProgress.style.width = '0%';
+    regStatusText.textContent = 'Starting registration...';
+    regResultsList.innerHTML = '';
+
+    let completed = 0;
+    let successful = 0;
+    let failed = 0;
+
+    try {
+        // Generate account list
+        const accounts = [];
+        for (let i = 0; i < count; i++) {
+            accounts.push({
+                username: generateUsername(pattern),
+                password: generatePassword(passLength)
+            });
+        }
+
+        regStatusText.textContent = `Registering ${count} accounts...`;
+
+        // Process accounts one by one with delay
+        for (let i = 0; i < accounts.length; i++) {
+            const account = accounts[i];
+
+            try {
+                const response = await axios.post('/user/register', account);
+
+                if (response.status === 200) {
+                    successful++;
+
+                    // Add result to display
+                    const resultCard = document.createElement('div');
+                    resultCard.className = 'user-card';
+                    resultCard.style.border = '2px solid #4CAF50';
+                    resultCard.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>${account.username}</strong>
+                                <div><small>ID: ${response.data.userInfo.id}</small></div>
+                                <div><small>Password: ${account.password}</small></div>
+                            </div>
+                            <span style="color: #4CAF50; font-size: 20px;">✓</span>
+                        </div>
+                    `;
+                    regResultsList.appendChild(resultCard);
+                }
+            } catch (error) {
+                failed++;
+
+                // Add error result to display
+                const resultCard = document.createElement('div');
+                resultCard.className = 'user-card';
+                resultCard.style.border = '2px solid #f44336';
+                resultCard.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>${account.username}</strong>
+                            <div><small style="color: #f44336;">${error.response?.data?.error || error.message}</small></div>
+                        </div>
+                        <span style="color: #f44336; font-size: 20px;">✗</span>
+                    </div>
+                `;
+                regResultsList.appendChild(resultCard);
+            }
+
+            completed++;
+
+            // Update progress
+            const progress = (completed / count) * 100;
+            regProgress.style.width = `${progress}%`;
+            regStatusText.textContent = `Processed ${completed}/${count} accounts (${successful} successful, ${failed} failed)`;
+
+            // Delay between requests (except for last one)
+            if (i < accounts.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        regStatusText.textContent = `Registration complete: ${successful} successful, ${failed} failed`;
+
+        if (successful > 0) {
+            showMessage("Success", `Registration completed! ${successful} accounts registered successfully.`);
+
+            // Refresh manage users if autoAdd is enabled and some succeeded
+            if (autoAdd && manageUsers.style.display !== 'none') {
+                loadUsers();
+            }
+        } else {
+            showMessage("Warning", "No accounts were registered successfully. Check the results for details.");
+        }
+
+    } catch (error) {
+        regStatusText.textContent = `Registration failed: ${error.message}`;
+        handleError(error);
+    } finally {
+        startAutoRegister.disabled = false;
     }
 });
