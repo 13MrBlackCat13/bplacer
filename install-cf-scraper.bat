@@ -29,7 +29,7 @@ echo.
 REM Clone CF-Clearance-Scraper if not exists
 if not exist "CF-Clearance-Scraper" (
     echo Cloning CF-Clearance-Scraper repository...
-    git clone https://github.com/MatthewZito/CF-Clearance-Scraper.git
+    git clone https://github.com/Xewdy444/CF-Clearance-Scraper.git
     if errorlevel 1 (
         echo ERROR: Failed to clone repository!
         pause

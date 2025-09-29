@@ -2977,18 +2977,26 @@ openManageUsers.addEventListener("click", async () => {
                         }
 
                         // Update JWT token manually if provided
+                        console.log('[DEBUG] JWT Token value:', jwtToken);
+                        console.log('[DEBUG] JWT Token starts with eyJ:', jwtToken?.startsWith('eyJ'));
                         if (jwtToken && jwtToken.startsWith('eyJ')) {
                             try {
+                                console.log('[DEBUG] Sending JWT update request...');
                                 const jwtPayload = { jwtToken };
                                 const jwtResp = await axios.put(`/user/${id}/update-jwt`, jwtPayload);
+                                console.log('[DEBUG] JWT update response:', jwtResp);
                                 if (jwtResp.status === 200) {
                                     authUpdated = true;
                                     users[id].cookies = users[id].cookies || {};
                                     users[id].cookies.j = jwtToken;
+                                    console.log('[DEBUG] JWT token updated successfully');
                                 }
                             } catch (jwtError) {
-                                console.warn('Failed to update JWT token:', jwtError);
+                                console.error('Failed to update JWT token:', jwtError);
+                                showMessage('Error', `Failed to update JWT token: ${jwtError.response?.data?.error || jwtError.message}`);
                             }
+                        } else {
+                            console.log('[DEBUG] JWT token not provided or does not start with eyJ');
                         }
 
                         if (resp.status === 200 && resp.data?.success) {

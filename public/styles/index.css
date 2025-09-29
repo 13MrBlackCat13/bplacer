@@ -1110,6 +1110,8 @@ input[type="range"]::-moz-range-thumb {
     box-shadow: var(--shadow);
     padding: 18px;
     width: min(92vw, 570px);
+    max-height: 90vh;
+    overflow-y: auto;
     text-align: center;
 }
 
