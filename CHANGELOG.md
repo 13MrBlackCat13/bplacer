@@ -1,3 +1,34 @@
+## Changelog v4.3.6 - NEEDS TESTING
+Major improvements to proxy system and Cloudflare handling. Extensive testing required.
+
+### New Features:
+- Implemented centralized HTTP client with automatic Cloudflare challenge detection
+- Added CF-Clearance token management with 23-hour caching
+- Integrated proxy support for all bplace.org API interactions (tiles, pixels, colors, flags, user info)
+- Added automatic credential-based account registration system with Turnstile captcha solving
+- Created batch registration API with proxy rotation support
+
+### Improvements:
+- Cookies are now included in loadTiles requests to prevent Cloudflare blocks during pixel checking
+- Added automatic fallback: works without CF-Clearance if no challenge is detected, obtains token on first block
+- Improved proxy URL building in registration system
+- Enhanced error handling for rate limiting (429 errors) in registration
+- Added detailed logging for CF-Clearance operations and debugging
+
+### Technical Changes:
+- Proxy selection now integrated into WPlacer login flow
+- All POST requests (paint, buyColor, equipFlag) now use centralized browser.fetch with CF support
+- CF-Clearance tokens automatically refresh when expired or blocked
+- Added registration guide documentation (REGISTRATION_GUIDE.md)
+- Created autoreg Python toolkit for batch account creation
+
+### Known Issues:
+- System requires extensive testing due to multiple new integrations
+- Rate limiting may occur during batch registration operations
+- CF-Clearance-Scraper dependency needs proper setup
+
+**IMPORTANT**: This build contains significant changes to core networking. Test thoroughly before production use.
+
 ## Changelog v4.3.5
 - Revert to last workable version. Update if you have troubles.
 - Added export jwt tokens feature. Thanks to [Almossr](https://github.com/ZypherFF)!

@@ -8,6 +8,7 @@ import cors from "cors";
 import { CookieJar } from "tough-cookie";
 import { gunzip, inflate, brotliDecompress } from "node:zlib";
 import { promisify } from "node:util";
+import { request } from "undici";
 // import { Impit } from "impit";  // Временно отключено
 import { Image, createCanvas, loadImage } from "canvas";
 import CFClearanceManager from "./cf-clearance-manager.js";
@@ -20,13 +21,15 @@ class MockImpit {
     this.cookieJar = options.cookieJar;
     this.proxyUrl = options.proxyUrl;
     this.userId = options.userId; // Для привязки cf_clearance к пользователю
+    this.skipCfClearance = options.skipCfClearance || false; // Skip auto CF-Clearance fetching
+    this.userAgent = options.userAgent; // Custom User-Agent
   }
 
   async fetch(url, options = {}) {
     console.log(`🔥 [DEBUG] MockImpit.fetch called:`, url);
 
     // Проверяем, нужен ли CF-Clearance для этого URL
-    const needsCfClearance = url.includes('bplace.org');
+    const needsCfClearance = url.includes('bplace.org') && !this.skipCfClearance;
 
     let cfClearanceData = null;
     if (needsCfClearance) {
@@ -35,15 +38,22 @@ class MockImpit {
         let proxyInfo = null;
         if (this.proxyUrl) {
           proxyInfo = this.parseProxyUrl(this.proxyUrl);
+          console.log(`🔐 [CF] Proxy info:`, JSON.stringify(proxyInfo, null, 2));
+        } else {
+          console.log(`🔐 [CF] No proxy configured, using direct connection`);
         }
 
+        console.log(`🔐 [CF] Requesting cf_clearance for userId: ${this.userId}, url: ${url}`);
         // Получаем CF-Clearance токен
         cfClearanceData = await cfClearanceManager.getClearance(proxyInfo, this.userId, url);
         if (cfClearanceData) {
-          console.log(`🔐 [CF] Using cf_clearance for ${url}`);
+          console.log(`🔐 [CF] Using cf_clearance for ${url}:`, Object.keys(cfClearanceData.cookies || {}).join(', '));
+        } else {
+          console.log(`⚠️ [CF] No cf_clearance data obtained`);
         }
       } catch (error) {
         console.log(`⚠️ [CF] Failed to get cf_clearance: ${error.message}`);
+        console.log(`⚠️ [CF] Stack trace:`, error.stack);
       }
     }
 
@@ -86,6 +96,13 @@ class MockImpit {
       console.log(`🔐 [CF] Added cf_clearance cookies and user-agent`);
     }
 
+    // If skipCfClearance is true, use custom User-Agent if provided
+    if (this.skipCfClearance && this.userAgent) {
+      options.headers = options.headers || {};
+      options.headers['User-Agent'] = this.userAgent;
+      console.log(`🔐 [CF] Using custom User-Agent: ${this.userAgent.substring(0, 50)}...`);
+    }
+
     console.log(`🔥 [DEBUG] Final headers:`, JSON.stringify(options.headers, null, 2));
 
     try {
@@ -93,7 +110,40 @@ class MockImpit {
       const response = await fetch(url, options);
       console.log(`🔥 [MockImpit] Fetch completed, status: ${response.status}`);
 
-      // Проверяем Cloudflare challenge при 403/502/503 ошибках
+      // Debug: Check for getSetCookie method availability
+      if (typeof response.headers.getSetCookie === 'function') {
+        const setCookies = response.headers.getSetCookie();
+        console.log(`🔥 [MockImpit] getSetCookie() found ${setCookies.length} cookies:`, setCookies.map(c => c.substring(0, 50)));
+
+        // Save all Set-Cookie headers to cookie jar
+        if (this.cookieJar && setCookies.length > 0) {
+          for (const setCookie of setCookies) {
+            try {
+              this.cookieJar.setCookieSync(setCookie, url);
+              console.log(`🔥 [MockImpit] Saved cookie to jar:`, setCookie.substring(0, 50));
+            } catch (cookieErr) {
+              console.log(`🔥 [MockImpit] Error saving cookie:`, cookieErr.message);
+            }
+          }
+        }
+      }
+
+      // Fallback: Save cookies from Set-Cookie header to cookie jar (old method)
+      if (this.cookieJar && response.headers.has('set-cookie')) {
+        try {
+          const setCookie = response.headers.get('set-cookie');
+          console.log(`🔥 [MockImpit] Set-Cookie header found:`, setCookie?.substring(0, 100));
+          if (setCookie) {
+            // Parse and save cookie to jar
+            this.cookieJar.setCookieSync(setCookie, url);
+            console.log(`🔥 [MockImpit] Saved cookie to jar`);
+          }
+        } catch (cookieErr) {
+          console.log(`🔥 [MockImpit] Error saving cookie:`, cookieErr.message);
+        }
+      }
+
+      // Проверяем Cloudflare challenge при 403 ошибке или если есть признаки Cloudflare в ответе
       if (needsCfClearance && (response.status === 403 || response.status === 502 || response.status === 503)) {
         try {
           console.log(`🔥 [MockImpit] Checking for Cloudflare challenge...`);
@@ -103,10 +153,23 @@ class MockImpit {
           const responseText = await responseClone.text();
           console.log(`🔥 [MockImpit] Response text read, length: ${responseText.length}`);
 
-          if (responseText.includes('cloudflare') || responseText.includes('Cloudflare') ||
-              responseText.includes('Just a moment') || responseText.includes('Checking your browser')) {
-            console.log(`🚫 [CF] Cloudflare challenge detected, refreshing cf_clearance`);
+          // Для 502/503 проверяем только если это действительно Cloudflare, а не просто ошибка сервера
+          const isCloudflareChallenge = responseText.includes('cloudflare') ||
+                                       responseText.includes('Cloudflare') ||
+                                       responseText.includes('Just a moment') ||
+                                       responseText.includes('Checking your browser');
 
+          // Для 403 всегда пытаемся обновить токен, для 502/503 только если это Cloudflare
+          const shouldRetry = (response.status === 403) ||
+                            ((response.status === 502 || response.status === 503) && isCloudflareChallenge);
+
+          if (shouldRetry) {
+            console.log(`🚫 [CF] Cloudflare challenge detected (status: ${response.status}), refreshing cf_clearance`);
+          } else {
+            console.log(`⚠️ [CF] Status ${response.status} but not a Cloudflare challenge (isCloudflare: ${isCloudflareChallenge}), returning original response`);
+          }
+
+          if (shouldRetry) {
             // Удаляем недействительный токен из кэша
             let proxyInfo = null;
             if (this.proxyUrl) {
@@ -122,8 +185,44 @@ class MockImpit {
             try {
               const newClearanceData = await cfClearanceManager.getClearance(proxyInfo, this.userId, url);
               if (newClearanceData) {
-                console.log(`✅ [CF] Successfully obtained new cf_clearance token`);
-                // Можно попробовать повторить запрос с новым токеном, но пока просто логируем
+                console.log(`✅ [CF] Successfully obtained new cf_clearance token, retrying request...`);
+
+                // Обновляем заголовки с новым токеном
+                options.headers = options.headers || {};
+
+                // Добавляем CF-Clearance куки из cookieJar (если есть)
+                let existingCookies = '';
+                if (this.cookieJar) {
+                  try {
+                    const cookies = this.cookieJar.getCookiesSync(url);
+                    if (cookies && cookies.length > 0) {
+                      existingCookies = cookies.map(c => `${c.key}=${c.value}`).join('; ');
+                    }
+                  } catch (e) {
+                    console.log(`🔥 [DEBUG] Error getting cookies for retry:`, e.message);
+                  }
+                }
+
+                // Добавляем новые CF-Clearance куки
+                const cfCookies = Object.entries(newClearanceData.cookies)
+                  .map(([name, value]) => `${name}=${value}`)
+                  .join('; ');
+
+                if (existingCookies) {
+                  options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
+                } else {
+                  options.headers['Cookie'] = cfCookies;
+                }
+
+                // Обновляем User-Agent
+                if (newClearanceData.userAgent) {
+                  options.headers['User-Agent'] = newClearanceData.userAgent;
+                }
+
+                console.log(`🔄 [CF] Retrying request with new cf_clearance token...`);
+                const retryResponse = await fetch(url, options);
+                console.log(`✅ [CF] Retry completed, status: ${retryResponse.status}`);
+                return retryResponse;
               }
             } catch (refreshError) {
               console.log(`❌ [CF] Failed to refresh cf_clearance: ${refreshError.message}`);
@@ -138,6 +237,111 @@ class MockImpit {
       return response;
     } catch (error) {
       console.log(`❌ [MockImpit] Fetch error: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // Special method using undici to get Set-Cookie headers (fetch API doesn't expose them)
+  async fetchWithCookies(url, options = {}) {
+    console.log(`🔥 [MockImpit] fetchWithCookies called: ${url}`);
+
+    // Same logic as fetch() method to add CF-Clearance
+    const needsCfClearance = url.includes('bplace.org');
+    let cfClearanceData = null;
+
+    if (needsCfClearance) {
+      try {
+        let proxyInfo = null;
+        if (this.proxyUrl) {
+          proxyInfo = this.parseProxyUrl(this.proxyUrl);
+        }
+
+        cfClearanceData = await cfClearanceManager.getClearance(proxyInfo, this.userId, url);
+      } catch (error) {
+        console.log(`⚠️ [CF] Failed to get cf_clearance: ${error.message}`);
+      }
+    }
+
+    // Add cookies from cookieJar
+    if (this.cookieJar) {
+      try {
+        const cookies = this.cookieJar.getCookiesSync(url);
+        if (cookies && cookies.length > 0) {
+          const cookieHeader = cookies.map(c => `${c.key}=${c.value}`).join('; ');
+          options.headers = options.headers || {};
+          options.headers['Cookie'] = cookieHeader;
+        }
+      } catch (e) {
+        console.log(`🔥 [DEBUG] Error getting cookies:`, e.message);
+      }
+    }
+
+    // Add CF-Clearance cookies and User-Agent
+    if (cfClearanceData) {
+      options.headers = options.headers || {};
+
+      const existingCookies = options.headers['Cookie'] || '';
+      const cfCookies = Object.entries(cfClearanceData.cookies)
+        .map(([name, value]) => `${name}=${value}`)
+        .join('; ');
+
+      if (existingCookies) {
+        options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
+      } else {
+        options.headers['Cookie'] = cfCookies;
+      }
+
+      if (cfClearanceData.userAgent) {
+        options.headers['User-Agent'] = cfClearanceData.userAgent;
+      }
+    }
+
+    try {
+      const { statusCode, headers, body } = await request(url, {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        body: options.body,
+        maxRedirections: 0 // Don't follow redirects automatically
+      });
+
+      console.log(`🔥 [MockImpit] undici request completed, status: ${statusCode}`);
+      console.log(`🔥 [MockImpit] Response headers:`, headers);
+
+      // Extract Set-Cookie headers (undici exposes them as array)
+      const setCookieHeaders = headers['set-cookie'] || [];
+      console.log(`🔥 [MockImpit] Set-Cookie headers from undici:`, setCookieHeaders);
+
+      // Check for Location header (redirect)
+      if (headers.location) {
+        console.log(`🔥 [MockImpit] Redirect location:`, headers.location);
+      }
+
+      // Save cookies to jar
+      if (this.cookieJar && setCookieHeaders.length > 0) {
+        for (const setCookie of setCookieHeaders) {
+          try {
+            this.cookieJar.setCookieSync(setCookie, url);
+            console.log(`🔥 [MockImpit] Saved cookie to jar:`, setCookie.substring(0, 50));
+          } catch (err) {
+            console.log(`🔥 [MockImpit] Error saving cookie:`, err.message);
+          }
+        }
+      }
+
+      // Convert body stream to text
+      let responseText = '';
+      for await (const chunk of body) {
+        responseText += chunk.toString();
+      }
+
+      return {
+        status: statusCode,
+        headers: headers,
+        text: async () => responseText,
+        json: async () => JSON.parse(responseText)
+      };
+    } catch (error) {
+      console.log(`❌ [MockImpit] undici request error: ${error.message}`);
       throw error;
     }
   }
@@ -271,6 +475,72 @@ cfClearanceManager.startPeriodicCleanup();
 
 // Очищаем устаревшие токены при запуске
 cfClearanceManager.cleanExpiredTokens();
+
+// Auto-start Turnstile Captcha Solver API
+let captchaApiProcess = null;
+function startCaptchaApi() {
+  const captchaApiPath = path.join(process.cwd(), 'autoreg', 'api_server.py');
+
+  // Check if the API server file exists
+  if (!existsSync(captchaApiPath)) {
+    console.log('⚠️ Captcha API server not found at:', captchaApiPath);
+    console.log('   Auto-registration will not work without captcha solver');
+    return;
+  }
+
+  console.log('🚀 Starting Turnstile Captcha Solver API...');
+
+  captchaApiProcess = spawn('python', ['api_server.py'], {
+    cwd: path.join(process.cwd(), 'autoreg'),
+    stdio: 'pipe',
+    shell: true
+  });
+
+  captchaApiProcess.stdout.on('data', (data) => {
+    const output = data.toString().trim();
+    if (output) {
+      console.log(`[Captcha API] ${output}`);
+    }
+  });
+
+  captchaApiProcess.stderr.on('data', (data) => {
+    const output = data.toString().trim();
+    if (output && !output.includes('WARNING')) {
+      console.log(`[Captcha API] ${output}`);
+    }
+  });
+
+  captchaApiProcess.on('close', (code) => {
+    console.log(`⚠️ Captcha API process exited with code ${code}`);
+    captchaApiProcess = null;
+  });
+
+  captchaApiProcess.on('error', (err) => {
+    console.log(`❌ Failed to start Captcha API: ${err.message}`);
+    console.log('   Make sure Python and required packages are installed (see autoreg/requirements.txt)');
+    captchaApiProcess = null;
+  });
+}
+
+// Start captcha API on server startup
+startCaptchaApi();
+
+// Graceful shutdown handler for captcha API
+process.on('SIGINT', () => {
+  if (captchaApiProcess) {
+    console.log('\n🛑 Stopping Captcha API...');
+    captchaApiProcess.kill();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  if (captchaApiProcess) {
+    console.log('\n🛑 Stopping Captcha API...');
+    captchaApiProcess.kill();
+  }
+  process.exit(0);
+});
 
 // Backups directories
 const backupsRootDir = path.join(dataDir, "backups");
@@ -992,7 +1262,15 @@ class WPlacer {
     const loadOneTile = async (targetTx, targetTy, allowActivate = true) => {
       try {
         const url = `https://bplace.org/files/s0/tiles/${targetTx}/${targetTy}.png?t=${Date.now()}`;
-        const resp = await fetch(url, { headers: { Accept: "image/*" } });
+
+        // Prepare headers with cf_clearance cookie
+        const headers = { Accept: "image/*" };
+        const cookieHeader = Object.keys(this.cookies).map(key => `${key}=${this.cookies[key]}`).join('; ');
+        if (cookieHeader) {
+          headers["Cookie"] = cookieHeader;
+        }
+
+        const resp = await fetch(url, { headers });
         if (resp.status === 404) {
           // Tile might be not initialized yet
           if (allowActivate && this.token) {
@@ -3898,54 +4176,164 @@ app.get("/users", (_, res) => {
   res.json(out);
 });
 
+// Function to solve Turnstile captcha using local API
+async function solveTurnstileCaptcha(url = 'https://bplace.org', sitekey = '0x4AAAAAABzxJUknzE7fFeq5') {
+  const captchaApiUrl = 'http://localhost:8080';
+  const timeout = 10000;
+  const pollInterval = 3000;
+
+  console.log(`🔐 [CAPTCHA] Solving Turnstile captcha for ${url} with sitekey ${sitekey}`);
+
+  try {
+    // Request captcha solving
+    const requestUrl = `${captchaApiUrl}/turnstile?url=${encodeURIComponent(url)}&sitekey=${encodeURIComponent(sitekey)}`;
+    const response = await fetch(requestUrl, { timeout });
+
+    if (response.status !== 202) {
+      throw new Error(`Captcha API returned unexpected status: ${response.status}`);
+    }
+
+    const taskData = await response.json();
+    const taskId = taskData.task_id;
+    console.log(`🔐 [CAPTCHA] Task created: ${taskId}`);
+
+    // Poll for result
+    const maxAttempts = 60;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      const resultUrl = `${captchaApiUrl}/result?id=${encodeURIComponent(taskId)}`;
+      const resultResponse = await fetch(resultUrl, { timeout });
+
+      if (resultResponse.status === 202) {
+        console.log(`🔐 [CAPTCHA] Still solving... (attempt ${attempt + 1}/${maxAttempts})`);
+        continue;
+      } else if (resultResponse.status === 200) {
+        const result = await resultResponse.json();
+        console.log(`🔐 [CAPTCHA] ✅ Captcha solved! Token length: ${result.value?.length || 0}`);
+        return result.value;
+      } else {
+        throw new Error(`Captcha solving failed with status: ${resultResponse.status}`);
+      }
+    }
+
+    throw new Error('Captcha solving timed out after maximum attempts');
+  } catch (error) {
+    console.log(`🔐 [CAPTCHA] ❌ Error solving captcha: ${error.message}`);
+    throw new Error(`Failed to solve captcha: ${error.message}`);
+  }
+}
+
+// Global proxy rotation counter for registration
+let registrationProxyIndex = 0;
+
+// Function to get next proxy for registration (with rotation)
+function getNextProxyForRegistration() {
+  if (!loadedProxies || loadedProxies.length === 0) {
+    return null;
+  }
+
+  const proxy = loadedProxies[registrationProxyIndex % loadedProxies.length];
+  registrationProxyIndex++;
+
+  // Build proxy URL string
+  let proxyUrl = `${proxy.protocol}://`;
+  if (proxy.username && proxy.password) {
+    proxyUrl += `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@`;
+  }
+  proxyUrl += `${proxy.host}:${proxy.port}`;
+
+  return proxyUrl;
+}
+
 // Function to register a new account on bplace.org
 async function registerAccount(username, password) {
   console.log(`📝 [REGISTER] Attempting to register account: ${username}`);
 
   try {
-    // Get cf_clearance token
-    let clearanceCookie = manualCookies.cf_clearance;
-    if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
-      console.log('🤖 Getting cf_clearance token for registration...');
-      const autoToken = await autoGetCfTokenAndInterruptQueues();
-      if (autoToken) {
-        clearanceCookie = autoToken;
+    // Select proxy for this registration (will be used for all requests)
+    const proxyUrl = getNextProxyForRegistration();
+    if (proxyUrl) {
+      console.log(`📝 [REGISTER] Using proxy: ${proxyUrl.replace(/:([^:]+)@/, ':***@')}`);
+    } else {
+      console.log(`📝 [REGISTER] No proxies available, using direct connection`);
+    }
+
+    // Try to get cf_clearance token with the selected proxy
+    let cfClearanceData = null;
+    let clearanceCookie = null;
+    const userId = `register_${Date.now()}`;
+
+    try {
+      if (proxyUrl) {
+        // Parse proxy for cfClearanceManager
+        const proxyInfo = MockImpit.prototype.parseProxyUrl(proxyUrl);
+        console.log(`📝 [REGISTER] Getting cf_clearance with proxy...`);
+        cfClearanceData = await cfClearanceManager.getClearance(proxyInfo, userId, 'https://bplace.org');
+      } else {
+        console.log(`📝 [REGISTER] Getting cf_clearance without proxy...`);
+        cfClearanceData = await cfClearanceManager.getClearance(null, userId, 'https://bplace.org');
       }
+
+      if (cfClearanceData && cfClearanceData.cookies && cfClearanceData.cookies.cf_clearance) {
+        clearanceCookie = cfClearanceData.cookies.cf_clearance;
+        console.log(`📝 [REGISTER] Got cf_clearance with User-Agent: ${cfClearanceData.userAgent?.substring(0, 50)}...`);
+      }
+    } catch (error) {
+      console.log(`⚠️ [REGISTER] Could not get cf_clearance (no challenge detected?): ${error.message}`);
+      console.log(`📝 [REGISTER] Continuing without cf_clearance cookie...`);
     }
 
-    if (!clearanceCookie) {
-      throw new Error("Unable to get cf_clearance token for registration");
-    }
+    const userAgent = cfClearanceData?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
-    // Create MockImpit instance for registration
+    // Create MockImpit instance for registration with the SAME proxy
     const jar = new CookieJar();
-    jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+    if (clearanceCookie) {
+      jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+    }
 
     const browser = new MockImpit({
       cookieJar: jar,
       browser: "chrome",
       ignoreTlsErrors: true,
-      userId: `register_${Date.now()}` // Temporary userId for registration attempt
+      userId: userId,
+      proxyUrl: proxyUrl, // Use the SAME proxy for all requests
+      skipCfClearance: true, // Don't auto-fetch cf_clearance, use the one in cookieJar
+      userAgent: userAgent // Use User-Agent from CF-Clearance
     });
 
-    // First, get the register page
-    console.log(`📝 [REGISTER] Getting register page...`);
-    const registerPageResponse = await browser.fetch('https://bplace.org/register');
+    // First, get the login page (which contains registration form at #register)
+    console.log(`📝 [REGISTER] Getting login page...`);
+    const registerPageResponse = await browser.fetch('https://bplace.org/login');
 
     if (registerPageResponse.status !== 200) {
-      throw new Error(`Failed to load register page: ${registerPageResponse.status}`);
+      throw new Error(`Failed to load login page: ${registerPageResponse.status}`);
     }
 
-    // For now, we'll skip captcha solving and assume it's handled by the autoreg Python script
-    // In a real implementation, you'd need to integrate the captcha solving API
-    console.log(`📝 [REGISTER] Registration requires captcha solving - this should be implemented`);
+    console.log(`📝 [REGISTER] Login page loaded successfully (status: ${registerPageResponse.status})`);
+
+    // Solve Turnstile captcha
+    console.log(`📝 [REGISTER] Solving Turnstile captcha...`);
+    let captchaToken;
+    try {
+      captchaToken = await solveTurnstileCaptcha();
+      if (!captchaToken) {
+        throw new Error("Captcha solver returned empty token");
+      }
+
+      // Wait 5 seconds after getting captcha token to avoid rate limiting
+      console.log(`📝 [REGISTER] Waiting 15 seconds before submitting...`);
+      await new Promise(resolve => setTimeout(resolve, 15000));
+    } catch (captchaError) {
+      throw new Error(`Captcha solving failed: ${captchaError.message}. Make sure the Python captcha solver is running on http://localhost:8080`);
+    }
 
     // Prepare registration data
     const registrationData = new URLSearchParams({
       username: username,
       password: password,
       confirm: password,
-      // 'cf-turnstile-response': captchaToken // This would need to be solved
+      'cf-turnstile-response': captchaToken
     });
 
     // Submit registration form
@@ -3954,9 +4342,15 @@ async function registerAccount(username, password) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://bplace.org/register',
+        'Referer': 'https://bplace.org/login',
         'Origin': 'https://bplace.org',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-GB,en;q=0.7',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Brave";v="140"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'same-origin',
@@ -3964,84 +4358,91 @@ async function registerAccount(username, password) {
         'Upgrade-Insecure-Requests': '1'
       },
       body: registrationData.toString(),
-      redirect: 'manual'
+      redirect: 'manual' // Don't follow redirects to capture Set-Cookie
     });
 
     console.log(`📝 [REGISTER] Registration response status: ${registerResponse.status}`);
 
-    // Check for successful registration
+    // Check for successful registration (302 redirect means success)
     if (registerResponse.status === 302 || registerResponse.status === 301) {
-      // Registration successful, extract JWT token from cookies
-      const setCookieHeaders = registerResponse.headers.get('set-cookie') || registerResponse.headers.get('Set-Cookie');
+      console.log(`📝 [REGISTER] Registration successful (redirect detected)`);
 
-      if (setCookieHeaders) {
+      // Try to extract Set-Cookie headers using getSetCookie() method
+      try {
+        const setCookieHeaders = registerResponse.headers.getSetCookie ? registerResponse.headers.getSetCookie() : [];
         console.log(`📝 [REGISTER] Set-Cookie headers:`, setCookieHeaders);
 
-        const cookieStrings = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        // Parse JWT token from Set-Cookie headers
+        for (const setCookie of setCookieHeaders) {
+          if (setCookie.startsWith('j=')) {
+            const jwtMatch = setCookie.match(/^j=([^;]+)/);
+            if (jwtMatch && jwtMatch[1]) {
+              const jwtToken = jwtMatch[1];
+              console.log(`📝 [REGISTER] JWT token found in Set-Cookie: ${jwtToken.substring(0, 50)}...`);
 
-        for (const cookieString of cookieStrings) {
-          if (cookieString.includes('j=')) {
-            const jCookieMatch = cookieString.match(/j=([^;]+)/);
-            if (jCookieMatch) {
-              const jwtToken = jCookieMatch[1];
-              console.log(`📝 [REGISTER] Registration successful, JWT token obtained: ${jwtToken.substring(0, 50)}...`);
+              // Save to cookie jar
+              jar.setCookieSync(`j=${jwtToken}; Path=/; HttpOnly`, 'https://bplace.org');
 
-              return {
+              const result = {
                 success: true,
-                username: username,
                 cookies: {
-                  j: jwtToken,
-                  cf_clearance: clearanceCookie
+                  j: jwtToken
                 }
               };
+              if (clearanceCookie) {
+                result.cookies.cf_clearance = clearanceCookie;
+              }
+              return result;
             }
           }
         }
-      }
 
-      // Try to get from cookie jar if not in headers
-      try {
+        // If no JWT in Set-Cookie headers, try to extract from cookie jar
         const cookies = jar.getCookiesSync('https://bplace.org');
+        console.log(`📝 [REGISTER] Cookies in jar after registration:`, cookies.map(c => `${c.key}=${c.value.substring(0, 20)}...`));
+
         for (const cookie of cookies) {
           if (cookie.key === 'j') {
-            console.log(`📝 [REGISTER] Registration successful, JWT token from jar: ${cookie.value.substring(0, 50)}...`);
-            return {
+            console.log(`📝 [REGISTER] JWT token found in jar: ${cookie.value.substring(0, 50)}...`);
+            const result = {
               success: true,
-              username: username,
               cookies: {
-                j: cookie.value,
-                cf_clearance: clearanceCookie
+                j: cookie.value
               }
             };
+            if (clearanceCookie) {
+              result.cookies.cf_clearance = clearanceCookie;
+            }
+            return result;
           }
         }
       } catch (err) {
-        console.log(`📝 [REGISTER] Could not extract from cookie jar: ${err.message}`);
+        console.log(`📝 [REGISTER] Could not extract JWT: ${err.message}`);
+      }
+
+      throw new Error("Registration successful but JWT token not found in response");
+    }
+
+    // Check for errors in response
+    const responseText = await registerResponse.text();
+    console.log(`📝 [REGISTER] Response text preview:`, responseText.substring(0, 200));
+
+    // Check for rate limiting
+    if (registerResponse.status === 401 || registerResponse.status === 429) {
+      if (responseText.includes('Too many requests') || responseText.includes('rate limit')) {
+        throw new Error("Rate limited - too many registration attempts. Please wait and try again later.");
       }
     }
 
-    // Check response for error messages
-    const responseText = await registerResponse.text();
-    console.log(`📝 [REGISTER] Response body:`, responseText.substring(0, 500));
-
-    if (responseText.includes('Username already exists') ||
-        responseText.includes('already taken') ||
-        responseText.includes('already in use')) {
+    if (responseText.includes('Username already exists') || responseText.includes('already taken')) {
       throw new Error("Username already exists");
     }
 
-    if (responseText.includes('Invalid captcha') ||
-        responseText.includes('captcha')) {
-      throw new Error("Captcha solving required - not implemented");
-    }
-
-    if (responseText.includes('Invalid username') ||
-        responseText.includes('Invalid password')) {
-      throw new Error("Invalid username or password format");
+    if (responseText.includes('captcha') || responseText.includes('Captcha')) {
+      throw new Error("Captcha verification failed");
     }
 
     throw new Error(`Registration failed with status ${registerResponse.status}`);
-
   } catch (error) {
     console.log(`📝 [REGISTER] Registration failed for ${username}: ${error.message}`);
     throw error;
@@ -4117,7 +4518,7 @@ async function loginWithCredentials(username, password) {
       password: password
     });
 
-    // Submit login form to the correct endpoint
+    // Submit login form to the correct endpoint (manual redirect to capture Set-Cookie)
     console.log(`🔐 [LOGIN] Submitting login form...`);
     const loginResponse = await browser.fetch('https://bplace.org/account/login', {
       method: 'POST',
@@ -4133,26 +4534,30 @@ async function loginWithCredentials(username, password) {
         'Upgrade-Insecure-Requests': '1'
       },
       body: loginData.toString(),
-      redirect: 'manual'
+      redirect: 'manual' // CHANGED: manual redirect to capture Set-Cookie headers
     });
 
-    // Check for successful login (usually a redirect)
-    if (loginResponse.status === 302 || loginResponse.status === 301) {
-      // Login successful, extract JWT token from cookies
-      const setCookieHeaders = loginResponse.headers.get('set-cookie') || loginResponse.headers.get('Set-Cookie');
+    console.log(`🔐 [LOGIN] Login response status: ${loginResponse.status}`);
 
-      if (setCookieHeaders) {
+    // Check for successful login (302 redirect means success)
+    if (loginResponse.status === 302 || loginResponse.status === 301) {
+      console.log(`🔐 [LOGIN] Login successful (redirect detected)`);
+
+      // Try to extract Set-Cookie headers using getSetCookie() method
+      try {
+        const setCookieHeaders = loginResponse.headers.getSetCookie ? loginResponse.headers.getSetCookie() : [];
         console.log(`🔐 [LOGIN] Set-Cookie headers:`, setCookieHeaders);
 
-        // Handle both single string and array of cookies
-        const cookieStrings = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        // Parse JWT token from Set-Cookie headers
+        for (const setCookie of setCookieHeaders) {
+          if (setCookie.startsWith('j=')) {
+            const jwtMatch = setCookie.match(/^j=([^;]+)/);
+            if (jwtMatch && jwtMatch[1]) {
+              const jwtToken = jwtMatch[1];
+              console.log(`🔐 [LOGIN] JWT token found in Set-Cookie: ${jwtToken.substring(0, 50)}...`);
 
-        for (const cookieString of cookieStrings) {
-          if (cookieString.includes('j=')) {
-            const jCookieMatch = cookieString.match(/j=([^;]+)/);
-            if (jCookieMatch) {
-              const jwtToken = jCookieMatch[1];
-              console.log(`🔐 [LOGIN] Login successful, JWT token obtained: ${jwtToken.substring(0, 50)}...`);
+              // Save to cookie jar
+              jar.setCookieSync(`j=${jwtToken}; Path=/; HttpOnly`, 'https://bplace.org');
 
               return {
                 j: jwtToken,
@@ -4161,31 +4566,30 @@ async function loginWithCredentials(username, password) {
             }
           }
         }
+      } catch (err) {
+        console.log(`🔐 [LOGIN] Error extracting Set-Cookie headers: ${err.message}`);
       }
 
-      // If no JWT found in headers, try to get from cookie jar
-      try {
-        const cookies = jar.getCookiesSync('https://bplace.org');
-        for (const cookie of cookies) {
-          if (cookie.key === 'j') {
-            console.log(`🔐 [LOGIN] Login successful, JWT token from jar: ${cookie.value.substring(0, 50)}...`);
-            return {
-              j: cookie.value,
-              cf_clearance: clearanceCookie
-            };
-          }
-        }
-      } catch (err) {
-        console.log(`🔐 [LOGIN] Could not extract from cookie jar: ${err.message}`);
-      }
+      throw new Error("Login successful but JWT token not found in Set-Cookie headers");
+    }
+
+    // Handle specific error codes
+    if (loginResponse.status === 502 || loginResponse.status === 503) {
+      throw new Error(`Server temporarily unavailable (${loginResponse.status}). Try again later.`);
     }
 
     // Check response for error messages
     const responseText = await loginResponse.text();
+    console.log(`🔐 [LOGIN] Response text preview:`, responseText.substring(0, 200));
+
     if (responseText.includes('Invalid username or password') ||
-        responseText.includes('Login failed') ||
-        responseText.includes('error')) {
+        responseText.includes('invalid credentials') ||
+        responseText.includes('Authentication failed')) {
       throw new Error("Invalid username or password");
+    }
+
+    if (responseText.includes('cloudflare') || responseText.includes('Cloudflare')) {
+      throw new Error("Cloudflare protection detected. Manual intervention may be required.");
     }
 
     throw new Error(`Login failed with status ${loginResponse.status}`);
@@ -4455,11 +4859,18 @@ app.put("/user/:id/update-jwt", async (req, res) => {
   const { id } = req.params;
   const { jwtToken } = req.body || {};
 
+  console.log(`🔥 [DEBUG] /user/${id}/update-jwt endpoint called`);
+  console.log(`🔥 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
+  console.log(`🔥 [DEBUG] jwtToken received:`, jwtToken);
+  console.log(`🔥 [DEBUG] jwtToken starts with 'eyJ':`, jwtToken?.startsWith('eyJ'));
+
   if (!users[id]) {
+    console.log(`❌ [DEBUG] User ${id} not found`);
     return res.status(404).json({ error: "User not found" });
   }
 
   if (!jwtToken || !jwtToken.startsWith('eyJ')) {
+    console.log(`❌ [DEBUG] Invalid JWT token format`);
     return res.status(400).json({ error: "Valid JWT token is required" });
   }
 

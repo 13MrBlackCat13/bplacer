@@ -152,11 +152,18 @@ class CFClearanceManager {
       });
 
       pythonProcess.on("close", (code) => {
+        // Логируем вывод для отладки
+        if (stdout) console.log(`🐍 [CF-Manager] Python stdout:`, stdout.substring(0, 500));
+        if (stderr) console.log(`🐍 [CF-Manager] Python stderr:`, stderr.substring(0, 500));
+
         if (code === 0) {
           try {
             // Читаем результат из файла
             if (existsSync(tempFile)) {
-              const result = JSON.parse(readFileSync(tempFile, "utf8"));
+              const fileContent = readFileSync(tempFile, "utf8");
+              console.log(`📄 [CF-Manager] File content:`, fileContent.substring(0, 500));
+
+              const result = JSON.parse(fileContent);
 
               // Удаляем временный файл
               try {
@@ -177,9 +184,11 @@ class CFClearanceManager {
                   cookies: this.parseCookies(latestEntry.cookies)
                 });
               } else {
+                console.log(`🔍 [CF-Manager] Available domains in file:`, Object.keys(result));
                 reject(new Error(`No clearance data found for domain ${domain} (checked both "${domain}" and ".${domain}")`));
               }
             } else {
+              console.log(`⚠️ [CF-Manager] Temp file not found: ${tempFile}`);
               // Пробуем извлечь из stdout если файл не создался
               const cfMatch = stdout.match(/Cookie: cf_clearance=([^\s]+)/);
               const uaMatch = stdout.match(/User agent: (.+)/);
