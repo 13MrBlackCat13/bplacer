@@ -3124,6 +3124,19 @@ app.use(express.static("public"));
 app.use('/data', express.static('data'));
 app.use(express.json({ limit: Infinity }));
 
+// Global error handler for JSON parsing errors
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('[Express] JSON Parse Error:', err.message);
+    console.error('[Express] Request URL:', req.method, req.originalUrl);
+    return res.status(400).json({
+      error: 'Invalid JSON in request body',
+      details: err.message
+    });
+  }
+  next();
+});
+
 // SSE endpoint for live logs of current session
 app.get("/logs/stream", (req, res) => {
   try {
