@@ -4279,8 +4279,12 @@ function getNextProxyForRegistration() {
     return null;
   }
 
-  const proxy = loadedProxies[registrationProxyIndex % loadedProxies.length];
-  registrationProxyIndex++;
+  // Use RANDOM proxy selection for registrations to avoid rate limiting
+  // (different from painting which uses sequential/random based on settings)
+  const currentIndex = Math.floor(Math.random() * loadedProxies.length);
+  const proxy = loadedProxies[currentIndex];
+
+  console.log(`📝 [REGISTER] Selected random proxy #${currentIndex + 1}/${loadedProxies.length}: ${proxy.host}:${proxy.port}`);
 
   // Build proxy URL string
   let proxyUrl = `${proxy.protocol}://`;
