@@ -3104,7 +3104,8 @@ class TemplateManager {
           //const maxWait = Math.max(10_000, Math.floor((currentSettings.accountCooldown || 15000) * 1.5));
           //waitTime = Math.min(waitTime, maxWait);
           this.status = `Waiting for charges.`;
-          log("SYSTEM", "wplacer", `[${this.name}] ⏳ No users ready. Waiting for next available user (${msWaitUntilNextUser.name}): ${duration(waitTime)}.`);
+          const nextUserName = msWaitUntilNextUser?.name || 'unknown';
+          log("SYSTEM", "wplacer", `[${this.name}] ⏳ No users ready. Waiting for next available user (${nextUserName}): ${duration(waitTime)}.`);
           await this._sleepInterruptible(waitTime);
         }
       }
