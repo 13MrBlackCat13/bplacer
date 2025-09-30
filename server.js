@@ -3356,10 +3356,15 @@ async function getCloudflareToken() {
       manualCookies.cf_clearance = clearanceData.cf_clearance;
       return clearanceData.cf_clearance;
     } else {
-      console.log('❌ Failed to retrieve CF-Clearance token');
+      console.log('⚠️ No CF-Clearance token obtained (likely no Cloudflare challenge detected)');
       return null;
     }
   } catch (error) {
+    // Check if error is due to "No Cloudflare challenge detected"
+    if (error.message && error.message.includes('No Cloudflare challenge')) {
+      console.log('ℹ️ No Cloudflare challenge present, token not needed');
+      return null;
+    }
     console.error('❌ Error in CF-Clearance token retrieval:', error.message);
     return null;
   }
@@ -4490,19 +4495,21 @@ async function loginWithCredentials(username, password) {
       }
     }
 
-    if (!clearanceCookie) {
-      throw new Error("Unable to get cf_clearance token for login");
-    }
-
-    // Create MockImpit instance for login
+    // Create MockImpit instance for login (with or without cf_clearance)
     const jar = new CookieJar();
-    jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+    if (clearanceCookie) {
+      jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
+      console.log(`🔐 [LOGIN] Using cf_clearance token for login`);
+    } else {
+      console.log(`⚠️ [LOGIN] No cf_clearance token available, proceeding without it`);
+    }
 
     const browser = new MockImpit({
       cookieJar: jar,
       browser: "chrome",
       ignoreTlsErrors: true,
-      userId: `login_${Date.now()}` // Temporary userId for login attempt
+      userId: `login_${Date.now()}`, // Temporary userId for login attempt
+      skipCfClearance: !clearanceCookie // Skip CF auto-fetch if we don't have a token
     });
 
     // First, get the login page to check for any CSRF tokens or required fields
@@ -4560,10 +4567,11 @@ async function loginWithCredentials(username, password) {
               // Save to cookie jar
               jar.setCookieSync(`j=${jwtToken}; Path=/; HttpOnly`, 'https://bplace.org');
 
-              return {
-                j: jwtToken,
-                cf_clearance: clearanceCookie
-              };
+              const result = { j: jwtToken };
+              if (clearanceCookie) {
+                result.cf_clearance = clearanceCookie;
+              }
+              return result;
             }
           }
         }
