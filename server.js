@@ -13,6 +13,25 @@ import { request } from "undici";
 import { Image, createCanvas, loadImage } from "canvas";
 import CFClearanceManager from "./cf-clearance-manager.js";
 
+// List of fallback User-Agents when CF-Clearance is not used
+const fallbackUserAgents = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.2420.81',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:124.0) Gecko/20100101 Firefox/124.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux i686; rv:124.0) Gecko/20100101 Firefox/124.0'
+];
+
+// Helper function to get random User-Agent
+const getRandomUserAgent = () => {
+  return fallbackUserAgents[Math.floor(Math.random() * fallbackUserAgents.length)];
+};
+
 // Временная замена для Impit с использованием fetch с поддержкой CF-Clearance
 class MockImpit {
   constructor(options) {
@@ -101,6 +120,14 @@ class MockImpit {
       options.headers = options.headers || {};
       options.headers['User-Agent'] = this.userAgent;
       console.log(`🔐 [CF] Using custom User-Agent: ${this.userAgent.substring(0, 50)}...`);
+    }
+
+    // If no User-Agent set yet (no CF-Clearance and no custom UA), use random fallback
+    options.headers = options.headers || {};
+    if (!options.headers['User-Agent']) {
+      const randomUA = getRandomUserAgent();
+      options.headers['User-Agent'] = randomUA;
+      console.log(`🔐 [CF] Using random fallback User-Agent: ${randomUA.substring(0, 60)}...`);
     }
 
     console.log(`🔥 [DEBUG] Final headers:`, JSON.stringify(options.headers, null, 2));
@@ -4303,7 +4330,14 @@ async function registerAccount(username, password) {
       console.log(`📝 [REGISTER] Continuing without cf_clearance cookie...`);
     }
 
-    const userAgent = cfClearanceData?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+    // Use User-Agent from CF-Clearance or get a random fallback
+    const userAgent = cfClearanceData?.userAgent || getRandomUserAgent();
+
+    if (cfClearanceData?.userAgent) {
+      console.log(`📝 [REGISTER] Using User-Agent from CF-Clearance: ${userAgent.substring(0, 80)}...`);
+    } else {
+      console.log(`📝 [REGISTER] Using random fallback User-Agent: ${userAgent.substring(0, 80)}...`);
+    }
 
     // Create MockImpit instance for registration with the SAME proxy
     const jar = new CookieJar();
