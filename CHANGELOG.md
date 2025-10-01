@@ -1,3 +1,15 @@
+## Changelog v4.3.10
+Improved heatmap visualization with rainbow gradient.
+
+### Improvements:
+- Enhanced heatmap with rainbow-like color gradient (red to blue)
+- Newest pixels now show in red, gradually transitioning to blue for older pixels
+- Added alpha fade for older pixels to improve visual clarity
+- Applied gradient to both fit and zoom heatmap modes
+
+### Credits:
+- Based on PR #2 by DaCrazyRaccoon with improvements to cover both render modes
+
 ## Changelog v4.3.9
 Critical fix for bot getting stuck on accounts without premium colors.
 
