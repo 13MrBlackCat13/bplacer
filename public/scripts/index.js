@@ -3180,7 +3180,7 @@ openManageUsers.addEventListener("click", async () => {
                         byId.set(String(id), {
                             userId: String(id),
                             name: u.name,
-                            extraColorsBitmap: u.extraColorsBitmap | 0,
+                            extraColorsBitmap: u.extraColorsBitmap || "0",
                             droplets: u.droplets | 0,
                             charges: { count: Math.floor(u.charges.count), max: u.charges.max },
                             level: Math.floor(u.level),
@@ -3190,7 +3190,7 @@ openManageUsers.addEventListener("click", async () => {
                         saveColorsCache();
                         if (colorsLastCheckLabel) colorsLastCheckLabel.textContent = new Date(nowTs).toLocaleString();
                         if (usersColorsLastCheckLabel) usersColorsLastCheckLabel.textContent = new Date(nowTs).toLocaleString();
-                        USERS_COLOR_STATE[String(id)] = { name: u.name, extraColorsBitmap: u.extraColorsBitmap | 0, droplets: u.droplets | 0 };
+                        USERS_COLOR_STATE[String(id)] = { name: u.name, extraColorsBitmap: u.extraColorsBitmap || "0", droplets: u.droplets | 0 };
 
                         // Update flags cache with fresh data from /user/status
                         USERS_FLAG_STATE[String(id)] = {
@@ -3398,13 +3398,13 @@ checkUserStatus.addEventListener("click", async () => {
                 const level = Math.floor(userInfo.level);
                 const progress = Math.round((userInfo.level % 1) * 100);
 
-                LAST_USER_STATUS[id] = { charges, max, droplets, level, progress, extraColorsBitmap: userInfo.extraColorsBitmap | 0 };
+                LAST_USER_STATUS[id] = { charges, max, droplets, level, progress, extraColorsBitmap: userInfo.extraColorsBitmap || "0" };
                 saveLastStatus();
 
                 colorReport.push({
                     userId: String(id),
                     name: userInfo.name,
-                    extraColorsBitmap: userInfo.extraColorsBitmap | 0,
+                    extraColorsBitmap: userInfo.extraColorsBitmap || "0",
                     droplets,
                     charges: { count: charges, max },
                     level,
@@ -3419,7 +3419,7 @@ checkUserStatus.addEventListener("click", async () => {
 
                 USERS_COLOR_STATE[id] = {
                     name: userInfo.name || `#${id}`,
-                    extraColorsBitmap: userInfo.extraColorsBitmap | 0,
+                    extraColorsBitmap: userInfo.extraColorsBitmap || "0",
                     droplets
                 };
                 totalCurrent += charges;
@@ -3867,7 +3867,7 @@ openAddTemplate.addEventListener("click", () => {
                 id,
                 name: usersObj[id].name,
                 droplets: (typeof s.droplets === 'number') ? s.droplets : (c.droplets | 0),
-                bitmap: (typeof s.extraColorsBitmap === 'number') ? s.extraColorsBitmap : (c.extraColorsBitmap | 0),
+                bitmap: s.extraColorsBitmap || c.extraColorsBitmap || "0",
                 charges: (typeof s.charges === 'number') ? Math.floor(s.charges) : Math.floor(c?.charges?.count || 0),
                 max: (typeof s.max === 'number') ? Math.floor(s.max) : Math.floor(c?.charges?.max || 0)
             };
@@ -6253,7 +6253,7 @@ async function loadUsersColorState(fromCacheOnly = false) {
             const r = mapById[id];
             USERS_COLOR_STATE[id] = {
                 name: users[id]?.name || `#${id}`,
-                extraColorsBitmap: r?.extraColorsBitmap | 0,
+                extraColorsBitmap: r?.extraColorsBitmap || "0",
                 droplets: r?.droplets | 0
             };
             if (r) {
@@ -6264,7 +6264,7 @@ async function loadUsersColorState(fromCacheOnly = false) {
                     charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
                     level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
                     progress: Math.round((r.progress ?? 0) | 0),
-                    extraColorsBitmap: r.extraColorsBitmap | 0,
+                    extraColorsBitmap: r.extraColorsBitmap || "0",
                 };
             }
         }
@@ -6285,7 +6285,7 @@ async function loadUsersColorState(fromCacheOnly = false) {
         const r = mapById[id];
         USERS_COLOR_STATE[id] = {
             name: u?.name || `#${id}`,
-            extraColorsBitmap: r?.extraColorsBitmap | 0,
+            extraColorsBitmap: r?.extraColorsBitmap || "0",
             droplets: r?.droplets | 0
         };
         if (r) {
@@ -6296,7 +6296,7 @@ async function loadUsersColorState(fromCacheOnly = false) {
                 charges: Math.floor(r.charges?.count ?? (LAST_USER_STATUS[id]?.charges ?? 0)),
                 level: Math.floor(r.level ?? (LAST_USER_STATUS[id]?.level ?? 0)),
                 progress: Math.round((r.progress ?? 0) | 0),
-                extraColorsBitmap: r.extraColorsBitmap | 0,
+                extraColorsBitmap: r.extraColorsBitmap || "0",
             };
         }
     }

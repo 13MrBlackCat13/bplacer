@@ -12,12 +12,16 @@ Improved bulk actions with detailed error reporting and automatic field validati
 - Fixed ReferenceError in bulk actions by properly loading user data before processing
 - Fixed "Name must be at most 15 characters" errors for auto-generated usernames
 - Improved error handling with detailed failure reasons for each user
+- Fixed Colors page showing incorrect ownership data due to 32-bit truncation of extraColorsBitmap
+- Premium colors 32-95 now display correct owner lists instead of "Nobody has this color yet"
 
 ### Technical Changes:
 - All bulk action functions now load user data via GET /users before processing
 - Added 100ms delay between bulk requests to prevent UI overwhelming
 - Improved progress indicators showing current user being processed
 - Server-side automatic field truncation for name and discord fields
+- Replaced all bitwise OR operations (| 0) on extraColorsBitmap with string fallback (|| "0")
+- Prevents 32-bit truncation that caused loss of premium color data for colors 64-95
 
 ## Changelog v4.3.7
 Bug fixes and performance improvements for color handling and Cloudflare challenge detection.
