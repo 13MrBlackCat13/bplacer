@@ -6720,6 +6720,159 @@ if (typeof importJwtBtn !== 'undefined' && importJwtBtn && typeof importJwtFile 
     });
 }
 
+// -- IMPORT CREDENTIALS (username:password) -- //
+const importCredsBtn = document.getElementById('importCredsBtn');
+const importCredsFile = document.getElementById('importCredsFile');
+
+if (typeof importCredsBtn !== 'undefined' && importCredsBtn && typeof importCredsFile !== 'undefined' && importCredsFile) {
+    const CONCURRENCY = 6; // concurrent login requests
+    const short = (s, n = 8) => (typeof s === 'string' ? `${s.slice(0, n)}…` : '');
+
+    importCredsBtn.addEventListener('click', () => importCredsFile.click());
+
+    importCredsFile.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        const originalHtml = importCredsBtn.innerHTML;
+        const showBusy = (done, total) => {
+            importCredsBtn.disabled = true;
+            importCredsBtn.innerHTML = total ? `Importing (${done}/${total})` : 'Importing…';
+        };
+        const clearBusy = () => {
+            importCredsBtn.disabled = false;
+            importCredsBtn.innerHTML = originalHtml;
+        };
+
+        try {
+            const text = await file.text();
+
+            // Parse lines: "username:password" format
+            const rawLines = text.split(/\r?\n/).map(l => l.trim());
+            const parsed = rawLines
+                .map(l => {
+                    if (!l) return null;
+                    // Remove comments
+                    if (l.startsWith('#') || l.startsWith('//')) return null;
+
+                    // Parse username:password
+                    const colonIndex = l.indexOf(':');
+                    if (colonIndex === -1) return null;
+
+                    const username = l.substring(0, colonIndex).trim();
+                    const password = l.substring(colonIndex + 1).trim();
+
+                    if (!username || !password) return null;
+
+                    return { username, password };
+                })
+                .filter(cred => cred !== null);
+
+            const inputCount = rawLines.length;
+            const parsedCount = parsed.length;
+
+            if (parsedCount === 0) {
+                showMessage('Error', 'No valid credentials found in the selected file.<br>Expected format: username:password (one per line)');
+                importCredsFile.value = null;
+                return;
+            }
+
+            // Try to fetch existing users and filter out duplicates by username
+            let skippedExisting = 0;
+            let credsToProcess = parsed.slice(); // copy
+            try {
+                const resp = await axios.get('/users');
+                if (resp.data && Array.isArray(resp.data)) {
+                    const existingUsernames = new Set();
+                    resp.data.forEach(u => {
+                        if (u.credentials && u.credentials.username) {
+                            existingUsernames.add(u.credentials.username.toLowerCase());
+                        }
+                    });
+
+                    const before = credsToProcess.length;
+                    credsToProcess = credsToProcess.filter(cred =>
+                        !existingUsernames.has(cred.username.toLowerCase())
+                    );
+                    skippedExisting = before - credsToProcess.length;
+                }
+            } catch (_) {
+                // If fetching existing users fails, just import all
+            }
+
+            if (credsToProcess.length === 0) {
+                showMessage('Info', `All ${parsedCount} credentials already exist in the system.`);
+                importCredsFile.value = null;
+                return;
+            }
+
+            // Start importing with concurrency limit
+            let done = 0;
+            const results = { success: 0, failed: 0, errors: [] };
+            showBusy(done, credsToProcess.length);
+
+            const processCredential = async (cred) => {
+                try {
+                    const response = await axios.post('/user', {
+                        credentials: {
+                            username: cred.username,
+                            password: cred.password
+                        }
+                    });
+
+                    if (response.status === 200 && response.data) {
+                        results.success++;
+                        return { success: true, username: cred.username, user: response.data };
+                    } else {
+                        results.failed++;
+                        results.errors.push(`${cred.username}: Unexpected response`);
+                        return { success: false, username: cred.username };
+                    }
+                } catch (error) {
+                    results.failed++;
+                    const errMsg = error.response?.data?.error || error.message || 'Unknown error';
+                    results.errors.push(`${cred.username}: ${errMsg}`);
+                    return { success: false, username: cred.username, error: errMsg };
+                }
+            };
+
+            // Process with concurrency control
+            for (let i = 0; i < credsToProcess.length; i += CONCURRENCY) {
+                const batch = credsToProcess.slice(i, i + CONCURRENCY);
+                await Promise.all(batch.map(processCredential));
+                done += batch.length;
+                showBusy(done, credsToProcess.length);
+            }
+
+            clearBusy();
+            importCredsFile.value = null;
+
+            // Show summary
+            const summaryLines = [
+                `<b>Import Complete</b>`,
+                `Total lines in file: ${inputCount}`,
+                `Parsed credentials: ${parsedCount}`,
+                skippedExisting > 0 ? `Skipped (already exist): ${skippedExisting}` : null,
+                `Processed: ${credsToProcess.length}`,
+                `<span style="color: green;">✔ Successfully imported: ${results.success}</span>`,
+                results.failed > 0 ? `<span style="color: red;">✘ Failed: ${results.failed}</span>` : null,
+                results.errors.length > 0 ? '<br><b>Errors:</b>' : null,
+                ...results.errors.slice(0, 10).map(err => `• ${err}`),
+                results.errors.length > 10 ? `<i>... and ${results.errors.length - 10} more errors</i>` : null
+            ].filter(line => line !== null);
+
+            showMessage('Import Summary', summaryLines.join('<br>'));
+            // Refresh Manage Users view
+            try { openManageUsers.click(); } catch (e) { }
+
+        } catch (readErr) {
+            clearBusy();
+            importCredsFile.value = null;
+            handleError(readErr);
+        }
+    });
+}
+
 // -- EXPORT JWT TOKENS -- //
 const exportJwtBtn = document.getElementById('exportJwtBtn');
 

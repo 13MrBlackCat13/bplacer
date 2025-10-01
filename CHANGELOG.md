@@ -1,5 +1,12 @@
 ## Changelog v4.3.10
-Improved heatmap visualization with rainbow gradient and better bulk action error messages.
+Improved heatmap visualization with rainbow gradient, better bulk action error messages, and credentials import.
+
+### New Features:
+- Added "Import Credentials (.txt)" button for importing accounts from username:password format
+- Credentials import supports format: "username:password" (one per line)
+- Automatic deduplication based on existing usernames
+- Parallel import with progress tracking (6 concurrent requests)
+- Detailed summary with success/failure counts and error messages
 
 ### Improvements:
 - Enhanced heatmap with rainbow-like color gradient (red to blue)
