@@ -498,7 +498,7 @@ select:focus-visible {
 
 /* FORMS */
 .form-card {
-    background: var(--bg-3);
+    background: rgba(255, 255, 255, .04);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 16px;
@@ -1396,7 +1396,7 @@ button[disabled] {
 
 /* SETTINGS  */
 .settings-card {
-    background: var(--bg-3);
+    background: rgba(255, 255, 255, .04);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
@@ -1489,7 +1489,7 @@ option {
 
 /* PREVIEWS  */
 .settings-preview-card {
-    background: var(--bg-3);
+    background: rgba(255, 255, 255, .04);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
@@ -2599,4 +2599,45 @@ p.credits a img {
     to {
         transform: translateX(calc(-1 * var(--marquee-distance, 0px)))
     }
+}
+
+.auth-option {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s, color 0.2s;
+}
+
+.auth-option:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.02)
+}
+
+/* hide default radio circle */
+.auth-option input[type="radio"] {
+    display: none;
+}
+
+/* normal state */
+.auth-option span {
+    font-weight: 500;
+}
+
+/* selected state → style the whole label */
+.auth-option input[type="radio"]:checked + span {
+    color: inherit; /* keep text color consistent */
+}
+
+.auth-option:has(input[type="radio"]:checked) {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    box-shadow: 0 6px 18px rgba(255, 145, 61, 0.25);
+    color: #fff;
+}
+
+.auth-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }

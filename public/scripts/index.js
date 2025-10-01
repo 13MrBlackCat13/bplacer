@@ -1714,10 +1714,8 @@ async function showManageTemplatePreview(t) {
             const rec = used[i];
             const x = (rec['Px X'] | 0), y = (rec['Px Y'] | 0);
             const ageIdx = used.length - 1 - i; // 0 = newest, grow older
-            const factor = ageIdx / Math.max(1, used.length - 1); // 0 = newest, 1 = oldest
-            const hue = factor * 240; // 0 (red) -> 240 (blue)
-            const alpha = (1 - factor) * 0.9; // 0.9 (newest) -> 0 (oldest)
-            pctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+            const alpha = 1.0 - (ageIdx / Math.max(1, used.length - 1)) * 0.9; // 1.0 .. 0.1
+            pctx.fillStyle = `rgba(255,0,0,${alpha.toFixed(3)})`;
             pctx.fillRect(x * MINI, y * MINI, MINI, MINI);
         }
     }
@@ -1735,12 +1733,10 @@ async function showManageTemplatePreview(t) {
             const x = (rec['Px X'] | 0), y = (rec['Px Y'] | 0);
             if (x < sx || y < sy || x >= sx + vw || y >= sy + vh) continue;
             const ageIdx = used.length - 1 - i;
-            const factor = ageIdx / Math.max(1, used.length - 1); // 0 = newest, 1 = oldest
-            const hue = factor * 240; // 0 (red) -> 240 (blue)
-            const alpha = (1 - factor) * 0.9; // 0.9 (newest) -> 0 (oldest)
+            const alpha = 1.0 - (ageIdx / Math.max(1, used.length - 1)) * 0.9; // 1.0 .. 0.1
             const cx = (x - sx) * cellW;
             const cy = (y - sy) * cellH;
-            pctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+            pctx.fillStyle = `rgba(255,0,0,${alpha.toFixed(3)})`;
             pctx.fillRect(Math.floor(cx), Math.floor(cy), Math.ceil(cellW), Math.ceil(cellH));
         }
     }
