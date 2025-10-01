@@ -1712,10 +1712,15 @@ async function showManageTemplatePreview(t) {
         const used = STATE.heatData.slice(start);
         for (let i = 0; i < used.length; i++) {
             const rec = used[i];
-            const x = (rec['Px X'] | 0), y = (rec['Px Y'] | 0);
-            const ageIdx = used.length - 1 - i; // 0 = newest, grow older
-            const alpha = 1.0 - (ageIdx / Math.max(1, used.length - 1)) * 0.9; // 1.0 .. 0.1
-            pctx.fillStyle = `rgba(255,0,0,${alpha.toFixed(3)})`;
+            const x = rec['Px X'] | 0,
+                y = rec['Px Y'] | 0;
+            const ageIdx = used.length - 1 - i;
+            const factor = ageIdx / Math.max(1, used.length - 1);
+            const hue = factor * 240;
+            const saturation = 100;
+            const lightness = 50;
+            const alpha = (1 - factor) * 0.9;
+            pctx.fillStyle = `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
             pctx.fillRect(x * MINI, y * MINI, MINI, MINI);
         }
     }
@@ -1730,13 +1735,18 @@ async function showManageTemplatePreview(t) {
         const used = STATE.heatData.slice(start);
         for (let i = 0; i < used.length; i++) {
             const rec = used[i];
-            const x = (rec['Px X'] | 0), y = (rec['Px Y'] | 0);
+            const x = rec['Px X'] | 0,
+                y = rec['Px Y'] | 0;
             if (x < sx || y < sy || x >= sx + vw || y >= sy + vh) continue;
             const ageIdx = used.length - 1 - i;
-            const alpha = 1.0 - (ageIdx / Math.max(1, used.length - 1)) * 0.9; // 1.0 .. 0.1
+            const factor = ageIdx / Math.max(1, used.length - 1);
+            const hue = factor * 240;
+            const saturation = 100;
+            const lightness = 50;
+            const alpha = (1 -factor) * 0.9;
             const cx = (x - sx) * cellW;
             const cy = (y - sy) * cellH;
-            pctx.fillStyle = `rgba(255,0,0,${alpha.toFixed(3)})`;
+            pctx.fillStyle = `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
             pctx.fillRect(Math.floor(cx), Math.floor(cy), Math.ceil(cellW), Math.ceil(cellH));
         }
     }
