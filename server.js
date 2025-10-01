@@ -5136,8 +5136,9 @@ app.post("/user/:id/open-profile", (req, res) => {
 app.post("/user/:id/alliance/join", async (req, res) => {
   const { id } = req.params;
   const { uuid } = req.body || {};
-  if (!users[id] || activeBrowserUsers.has(id)) return res.sendStatus(409);
-  if (typeof uuid !== 'string' || !uuid.trim()) return res.status(400).json({ error: "uuid_required" });
+  if (!users[id]) return res.status(404).json({ error: "User not found" });
+  if (activeBrowserUsers.has(id)) return res.status(409).json({ error: "User is currently active" });
+  if (typeof uuid !== 'string' || !uuid.trim()) return res.status(400).json({ error: "Alliance UUID is required" });
 
   activeBrowserUsers.add(id);
   const wplacer = new WPlacer();

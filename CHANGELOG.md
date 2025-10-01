@@ -1,14 +1,18 @@
 ## Changelog v4.3.10
-Improved heatmap visualization with rainbow gradient.
+Improved heatmap visualization with rainbow gradient and better bulk action error messages.
 
 ### Improvements:
 - Enhanced heatmap with rainbow-like color gradient (red to blue)
 - Newest pixels now show in red, gradually transitioning to blue for older pixels
 - Added alpha fade for older pixels to improve visual clarity
 - Applied gradient to both fit and zoom heatmap modes
+- Improved alliance join error messages (409 now returns "User is currently active")
+
+### Bug Fixes:
+- Fixed bulk alliance join showing generic "Conflict" instead of detailed error message
 
 ### Credits:
-- Based on PR #2 by DaCrazyRaccoon with improvements to cover both render modes
+- Heatmap improvements based on PR #2 by DaCrazyRaccoon with enhancements
 
 ## Changelog v4.3.9
 Critical fix for bot getting stuck on accounts without premium colors.
