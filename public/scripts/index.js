@@ -6725,7 +6725,7 @@ const importCredsBtn = document.getElementById('importCredsBtn');
 const importCredsFile = document.getElementById('importCredsFile');
 
 if (typeof importCredsBtn !== 'undefined' && importCredsBtn && typeof importCredsFile !== 'undefined' && importCredsFile) {
-    const CONCURRENCY = 6; // concurrent login requests
+    const CONCURRENCY = 2; // concurrent login requests
     const short = (s, n = 8) => (typeof s === 'string' ? `${s.slice(0, n)}…` : '');
 
     importCredsBtn.addEventListener('click', () => importCredsFile.click());
@@ -6817,7 +6817,8 @@ if (typeof importCredsBtn !== 'undefined' && importCredsBtn && typeof importCred
                         credentials: {
                             username: cred.username,
                             password: cred.password
-                        }
+                        },
+                        useProxy: true // Enable proxy rotation for import
                     });
 
                     if (response.status === 200 && response.data) {
@@ -6836,12 +6837,17 @@ if (typeof importCredsBtn !== 'undefined' && importCredsBtn && typeof importCred
                 }
             };
 
-            // Process with concurrency control
+            // Process with concurrency control and delay between batches
             for (let i = 0; i < credsToProcess.length; i += CONCURRENCY) {
                 const batch = credsToProcess.slice(i, i + CONCURRENCY);
                 await Promise.all(batch.map(processCredential));
                 done += batch.length;
                 showBusy(done, credsToProcess.length);
+
+                // Add 15-second delay between batches (except after the last batch)
+                if (i + CONCURRENCY < credsToProcess.length) {
+                    await new Promise(resolve => setTimeout(resolve, 15000));
+                }
             }
 
             clearBusy();

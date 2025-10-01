@@ -4600,21 +4600,48 @@ async function refreshUserToken(userId) {
 }
 
 // Function to login with username/password and get JWT token
-async function loginWithCredentials(username, password) {
-  console.log(`🔐 [LOGIN] Attempting to login with username: ${username}`);
+async function loginWithCredentials(username, password, useProxy = false) {
+  console.log(`🔐 [LOGIN] Attempting to login with username: ${username}, useProxy: ${useProxy}`);
 
   try {
-    // Get cf_clearance token
-    let clearanceCookie = manualCookies.cf_clearance;
-    if (!clearanceCookie || !(await isCfTokenValid(clearanceCookie))) {
-      console.log('🤖 Getting cf_clearance token for login...');
-      const autoToken = await autoGetCfTokenAndInterruptQueues();
-      if (autoToken) {
-        clearanceCookie = autoToken;
+    // Select proxy if requested
+    let proxyUrl = null;
+    let proxyInfo = null;
+    if (useProxy) {
+      const proxySel = getNextProxy();
+      if (proxySel) {
+        proxyUrl = proxySel.url;
+        console.log(`🔐 [LOGIN] Using proxy #${proxySel.idx}: ${proxySel.display}`);
+      } else if (currentSettings.proxyEnabled && loadedProxies.length === 0) {
+        console.log(`⚠️ [LOGIN] Proxy requested but no valid proxies available`);
       }
     }
 
-    // Create MockImpit instance for login (with or without cf_clearance)
+    // Get cf_clearance token (with proxy if enabled)
+    const userId = `login_${Date.now()}`;
+    let clearanceCookie = null;
+    let cfClearanceData = null;
+
+    try {
+      if (proxyUrl) {
+        proxyInfo = MockImpit.prototype.parseProxyUrl(proxyUrl);
+        console.log(`🔐 [LOGIN] Getting cf_clearance with proxy...`);
+        cfClearanceData = await cfClearanceManager.getClearance(proxyInfo, userId, 'https://bplace.org');
+      } else {
+        console.log(`🔐 [LOGIN] Getting cf_clearance without proxy...`);
+        cfClearanceData = await cfClearanceManager.getClearance(null, userId, 'https://bplace.org');
+      }
+
+      if (cfClearanceData && cfClearanceData.cookies && cfClearanceData.cookies.cf_clearance) {
+        clearanceCookie = cfClearanceData.cookies.cf_clearance;
+        console.log(`🔐 [LOGIN] Got cf_clearance with User-Agent: ${cfClearanceData.userAgent?.substring(0, 50)}...`);
+      }
+    } catch (error) {
+      console.log(`⚠️ [LOGIN] Could not get cf_clearance: ${error.message}`);
+      console.log(`🔐 [LOGIN] Continuing without cf_clearance cookie...`);
+    }
+
+    // Create MockImpit instance for login
     const jar = new CookieJar();
     if (clearanceCookie) {
       jar.setCookieSync(`cf_clearance=${clearanceCookie}; Path=/`, "https://bplace.org");
@@ -4623,13 +4650,19 @@ async function loginWithCredentials(username, password) {
       console.log(`⚠️ [LOGIN] No cf_clearance token available, proceeding without it`);
     }
 
-    const browser = new MockImpit({
+    const browserOptions = {
       cookieJar: jar,
       browser: "chrome",
       ignoreTlsErrors: true,
-      userId: `login_${Date.now()}`, // Temporary userId for login attempt
+      userId: userId,
       skipCfClearance: !clearanceCookie // Skip CF auto-fetch if we don't have a token
-    });
+    };
+
+    if (proxyUrl) {
+      browserOptions.proxyUrl = proxyUrl;
+    }
+
+    const browser = new MockImpit(browserOptions);
 
     // First, get the login page to check for any CSRF tokens or required fields
     console.log(`🔐 [LOGIN] Getting login page...`);
@@ -4734,12 +4767,13 @@ app.post("/user", async (req, res) => {
 
   let cookiesToUse = req.body.cookies;
   let credentials = req.body.credentials;
+  const useProxy = req.body.useProxy === true; // Use proxy if explicitly requested
 
   // Handle login with username/password
   if (credentials && credentials.username && credentials.password) {
     try {
-      console.log(`🔐 [LOGIN] Login attempt with credentials for: ${credentials.username}`);
-      cookiesToUse = await loginWithCredentials(credentials.username, credentials.password);
+      console.log(`🔐 [LOGIN] Login attempt with credentials for: ${credentials.username}, useProxy: ${useProxy}`);
+      cookiesToUse = await loginWithCredentials(credentials.username, credentials.password, useProxy);
     } catch (error) {
       console.log(`🔐 [LOGIN] Login failed: ${error.message}`);
       return res.status(401).json({
