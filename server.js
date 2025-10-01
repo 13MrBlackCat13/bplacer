@@ -3030,7 +3030,35 @@ class TemplateManager {
           if (!p) continue;
           const threshold = currentSettings.alwaysDrawOnCharge ? 1 : Math.max(1, Math.floor(p.max * currentSettings.chargeThreshold));
           if (Math.floor(p.count) >= threshold) {
-            if (!bestPredicted || Math.floor(p.count) > Math.floor(bestPredicted.count)) {
+            // Check if user can paint: has charges AND (has needed colors OR has droplets to buy them)
+            let canPaint = true;
+            if (this.autoBuyNeededColors && this.templatePremiumColors && this.templatePremiumColors.size > 0) {
+              const reserve = currentSettings.dropletReserve || 0;
+              const userDroplets = Number(LAST_USER_STATUS[userId]?.droplets || 0);
+              const userBitmap = LAST_USER_STATUS[userId]?.extraColorsBitmap || "0";
+
+              // Check if user owns at least one needed premium color
+              let hasAnyNeededColor = false;
+              for (const colorId of Array.from(this.templatePremiumColors)) {
+                if (this._hasPremium(userBitmap, colorId)) {
+                  hasAnyNeededColor = true;
+                  break;
+                }
+              }
+
+              // Check if user has enough droplets to buy a color (2000 + reserve)
+              const canBuyColor = (userDroplets - reserve) >= 2000;
+
+              // Skip user if they have neither the colors nor droplets to buy them
+              if (!hasAnyNeededColor && !canBuyColor) {
+                canPaint = false;
+                try {
+                  log(userId, rec.name, `[${this.name}] ⏭️ Skipping user: no needed premium colors and insufficient droplets (${userDroplets} drops, need ${2000 + reserve}).`);
+                } catch (_) {}
+              }
+            }
+
+            if (canPaint && (!bestPredicted || Math.floor(p.count) > Math.floor(bestPredicted.count))) {
               bestPredicted = p; bestUserId = userId;
             }
           }

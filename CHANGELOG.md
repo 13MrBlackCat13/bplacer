@@ -1,3 +1,16 @@
+## Changelog v4.3.9
+Critical fix for bot getting stuck on accounts without premium colors.
+
+### Bug Fixes:
+- Fixed bot getting stuck on accounts without premium colors and insufficient droplets to buy them
+- Bot now skips users who lack needed premium colors AND cannot afford to purchase them (2000 droplets + reserve)
+- Prevents infinite loop when all accounts have charges but none can paint premium pixels
+
+### Technical Changes:
+- Added premium color ownership check in user queue selection algorithm
+- Queue now validates users can paint before selecting them (checks color ownership and droplet balance)
+- Users without needed colors and insufficient funds are now skipped in queue rotation
+
 ## Changelog v4.3.8
 Improved bulk actions with detailed error reporting and automatic field validation.
 
