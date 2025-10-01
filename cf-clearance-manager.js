@@ -97,6 +97,23 @@ class CFClearanceManager {
 
         console.log(`✅ [CF-Manager] Successfully obtained cf_clearance for ${key}`);
         return cacheEntry;
+      } else if (clearanceData && clearanceData.noChallengeDetected) {
+        // Кешируем состояние "No challenge detected" на 1 час
+        // (короче чем CF токен, т.к. challenge может появиться в любой момент)
+        const expires = Date.now() + (1 * 60 * 60 * 1000); // 1 час
+
+        const cacheEntry = {
+          noChallengeDetected: true,
+          expires: expires,
+          obtainedAt: new Date().toISOString()
+        };
+
+        const key = this.generateCacheKey(proxy, userId);
+        this.clearanceCache.set(key, cacheEntry);
+        this.saveCache();
+
+        console.log(`✅ [CF-Manager] Cached 'no challenge' state for ${key} (expires in 1 hour)`);
+        return cacheEntry;
       }
     } catch (error) {
       console.log(`❌ [CF-Manager] Failed to obtain cf_clearance: ${error.message}`);
@@ -189,6 +206,18 @@ class CFClearanceManager {
               }
             } else {
               console.log(`⚠️ [CF-Manager] Temp file not found: ${tempFile}`);
+
+              // Проверяем, есть ли сообщение "No Cloudflare challenge detected"
+              if (stderr.includes('No Cloudflare challenge detected') ||
+                  stdout.includes('No Cloudflare challenge detected')) {
+                console.log(`✅ [CF-Manager] No Cloudflare challenge detected - site is accessible without CF-Clearance`);
+                resolve({
+                  noChallengeDetected: true,
+                  message: "No Cloudflare challenge detected"
+                });
+                return;
+              }
+
               // Пробуем извлечь из stdout если файл не создался
               const cfMatch = stdout.match(/Cookie: cf_clearance=([^\s]+)/);
               const uaMatch = stdout.match(/User agent: (.+)/);

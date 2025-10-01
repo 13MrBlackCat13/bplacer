@@ -1,3 +1,22 @@
+## Changelog v4.3.7
+Bug fixes and performance improvements for color handling and Cloudflare challenge detection.
+
+### Bug Fixes:
+- Fixed hasColor() method to properly support premium colors 64-95 using BigInt operations
+- Premium colors in the upper range (64-95) now correctly detected for ownership checks
+- Prevents bot from attempting to paint pixels with colors the account doesn't own
+
+### Performance Improvements:
+- Added caching for "No Cloudflare challenge detected" state (1 hour TTL)
+- Significantly reduced Python scraper invocations when no CF challenge is present
+- First request now gets cached result if no challenge exists, avoiding redundant scraper calls
+- Python scraper only runs when actual Cloudflare block is detected (403/502/503)
+
+### Technical Changes:
+- Updated CF-Clearance manager to cache negative challenge detection results
+- Modified MockImpit.fetch() to handle cached "no challenge" state properly
+- Improved retry logic to check for challenge state before invoking scraper
+
 ## Changelog v4.3.6 - NEEDS TESTING
 Major improvements to proxy system and Cloudflare handling. Extensive testing required.
 

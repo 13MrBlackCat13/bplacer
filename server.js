@@ -95,24 +95,30 @@ class MockImpit {
     if (cfClearanceData) {
       options.headers = options.headers || {};
 
-      // Добавляем CF-Clearance куки
-      const existingCookies = options.headers['Cookie'] || '';
-      const cfCookies = Object.entries(cfClearanceData.cookies)
-        .map(([name, value]) => `${name}=${value}`)
-        .join('; ');
+      // Проверяем, есть ли флаг "No Challenge Detected"
+      if (cfClearanceData.noChallengeDetected) {
+        console.log(`✅ [CF] No Cloudflare challenge - using cached 'no challenge' state, skipping CF cookies`);
+        // Не добавляем CF cookies, продолжаем с обычными cookies
+      } else if (cfClearanceData.cf_clearance && cfClearanceData.cookies) {
+        // Добавляем CF-Clearance куки
+        const existingCookies = options.headers['Cookie'] || '';
+        const cfCookies = Object.entries(cfClearanceData.cookies)
+          .map(([name, value]) => `${name}=${value}`)
+          .join('; ');
 
-      if (existingCookies) {
-        options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
-      } else {
-        options.headers['Cookie'] = cfCookies;
+        if (existingCookies) {
+          options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
+        } else {
+          options.headers['Cookie'] = cfCookies;
+        }
+
+        // Обновляем User-Agent на тот, что использовался для получения токена
+        if (cfClearanceData.userAgent) {
+          options.headers['User-Agent'] = cfClearanceData.userAgent;
+        }
+
+        console.log(`🔐 [CF] Added cf_clearance cookies and user-agent`);
       }
-
-      // Обновляем User-Agent на тот, что использовался для получения токена
-      if (cfClearanceData.userAgent) {
-        options.headers['User-Agent'] = cfClearanceData.userAgent;
-      }
-
-      console.log(`🔐 [CF] Added cf_clearance cookies and user-agent`);
     }
 
     // If skipCfClearance is true, use custom User-Agent if provided
@@ -230,26 +236,33 @@ class MockImpit {
                   }
                 }
 
-                // Добавляем новые CF-Clearance куки
-                const cfCookies = Object.entries(newClearanceData.cookies)
-                  .map(([name, value]) => `${name}=${value}`)
-                  .join('; ');
+                // Проверяем тип полученных данных
+                if (newClearanceData.noChallengeDetected) {
+                  // Если challenge все еще не обнаружен, возвращаем оригинальный ответ
+                  console.log(`⚠️ [CF] No challenge detected on retry - returning original 403 response`);
+                  return response;
+                } else if (newClearanceData.cookies) {
+                  // Добавляем новые CF-Clearance куки
+                  const cfCookies = Object.entries(newClearanceData.cookies)
+                    .map(([name, value]) => `${name}=${value}`)
+                    .join('; ');
 
-                if (existingCookies) {
-                  options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
-                } else {
-                  options.headers['Cookie'] = cfCookies;
+                  if (existingCookies) {
+                    options.headers['Cookie'] = `${existingCookies}; ${cfCookies}`;
+                  } else {
+                    options.headers['Cookie'] = cfCookies;
+                  }
+
+                  // Обновляем User-Agent
+                  if (newClearanceData.userAgent) {
+                    options.headers['User-Agent'] = newClearanceData.userAgent;
+                  }
+
+                  console.log(`🔄 [CF] Retrying request with new cf_clearance token...`);
+                  const retryResponse = await fetch(url, options);
+                  console.log(`✅ [CF] Retry completed, status: ${retryResponse.status}`);
+                  return retryResponse;
                 }
-
-                // Обновляем User-Agent
-                if (newClearanceData.userAgent) {
-                  options.headers['User-Agent'] = newClearanceData.userAgent;
-                }
-
-                console.log(`🔄 [CF] Retrying request with new cf_clearance token...`);
-                const retryResponse = await fetch(url, options);
-                console.log(`✅ [CF] Retry completed, status: ${retryResponse.status}`);
-                return retryResponse;
               }
             } catch (refreshError) {
               console.log(`❌ [CF] Failed to refresh cf_clearance: ${refreshError.message}`);
@@ -1381,8 +1394,35 @@ class WPlacer {
   }
 
   hasColor(id) {
-    if (id < colorBitmapShift) return true; // transparent + basic colors
-    return !!(this.userInfo.extraColorsBitmap & (1 << (id - colorBitmapShift)));
+    // Free colors (0-31) are always available
+    if (id < 32) return true;
+
+    // Premium colors (32-95) - use BigInt for 64-bit bitmap
+    if (id >= 32 && id <= 95) {
+      try {
+        let bitmap;
+        if (typeof this.userInfo.extraColorsBitmap === 'string') {
+          const hexStr = this.userInfo.extraColorsBitmap.startsWith('0x')
+            ? this.userInfo.extraColorsBitmap
+            : '0x' + this.userInfo.extraColorsBitmap;
+          bitmap = BigInt(hexStr);
+        } else {
+          bitmap = BigInt(this.userInfo.extraColorsBitmap || 0);
+        }
+        const bitPos = BigInt(id - 32);
+        return (bitmap & (BigInt(1) << bitPos)) !== BigInt(0);
+      } catch (e) {
+        console.error(`[DEBUG] hasColor BigInt conversion error:`, {
+          colorId: id,
+          bitmap: this.userInfo.extraColorsBitmap,
+          bitmapType: typeof this.userInfo.extraColorsBitmap,
+          error: e.message
+        });
+        return false;
+      }
+    }
+
+    return false;
   }
 
   async _executePaint(tx, ty, body) {
