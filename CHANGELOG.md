@@ -1,3 +1,24 @@
+## Changelog v4.3.8
+Improved bulk actions with detailed error reporting and automatic field validation.
+
+### Improvements:
+- Added detailed error reporting for all bulk actions (Join Alliance, Set Discord, Enable/Disable Show Last Pixel)
+- Bulk actions now display user names in progress instead of just IDs
+- Failed operations now show scrollable list with specific error messages and status codes
+- Automatic truncation of name and discord fields to 15 characters (bplace.org API limit)
+- Prevents 400 errors caused by auto-generated usernames exceeding character limits
+
+### Bug Fixes:
+- Fixed ReferenceError in bulk actions by properly loading user data before processing
+- Fixed "Name must be at most 15 characters" errors for auto-generated usernames
+- Improved error handling with detailed failure reasons for each user
+
+### Technical Changes:
+- All bulk action functions now load user data via GET /users before processing
+- Added 100ms delay between bulk requests to prevent UI overwhelming
+- Improved progress indicators showing current user being processed
+- Server-side automatic field truncation for name and discord fields
+
 ## Changelog v4.3.7
 Bug fixes and performance improvements for color handling and Cloudflare challenge detection.
 

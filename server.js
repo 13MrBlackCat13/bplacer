@@ -5002,14 +5002,14 @@ app.put("/user/:id/update-profile", async (req, res) => {
   if (!users[id] || activeBrowserUsers.has(id)) return res.sendStatus(409);
 
   // Always send all fields to backend, but validate here
-  const name = typeof req.body?.name === "string" ? String(req.body.name).trim() : "";
-  const discord = typeof req.body?.discord === "string" ? String(req.body.discord).trim() : "";
+  // Use current name if not provided (required by bplace.org API)
+  const nameFromRequest = typeof req.body?.name === "string" ? String(req.body.name).trim() : "";
+  const nameRaw = nameFromRequest || users[id]?.name || "";
+  const name = nameRaw.slice(0, 15); // Truncate to 15 chars max (bplace.org API limit)
+  const discord = typeof req.body?.discord === "string" ? String(req.body.discord).trim().slice(0, 15) : "";
   const showLastPixel = typeof req.body?.showLastPixel === "boolean" ? !!req.body.showLastPixel : !!users[id]?.showLastPixel;
   const shortLabelRaw = typeof req.body?.shortLabel === "string" ? String(req.body.shortLabel) : "";
   const shortLabel = shortLabelRaw.trim().slice(0, 40);
-
-  if (name && name.length > 15) return res.status(400).json({ error: "Name must be at most 15 characters" });
-  if (discord && discord.length > 15) return res.status(400).json({ error: "Discord must be at most 15 characters" });
 
   // Always persist local-only field if provided
   if (typeof req.body?.shortLabel === "string") {
@@ -5017,7 +5017,7 @@ app.put("/user/:id/update-profile", async (req, res) => {
   }
 
   // Determine if remote update is needed
-  const willUpdateRemote = (name && name !== users[id].name) || (discord !== users[id].discord) || (showLastPixel !== !!users[id].showLastPixel);
+  const willUpdateRemote = (nameFromRequest && name !== users[id].name) || (discord !== users[id].discord) || (showLastPixel !== !!users[id].showLastPixel);
 
   if (!willUpdateRemote) {
     saveUsers();

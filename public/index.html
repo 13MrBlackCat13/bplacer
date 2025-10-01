@@ -309,7 +309,90 @@
 
                     <div id="userList" class="cards-grid"></div>
 
+                    <div class="form-actions" style="margin-top: 16px;">
+                        <button id="openBulkActions" class="secondary-button">
+                            <img src="icons/manageUsers.svg" alt="" />
+                            Bulk Actions
+                        </button>
+                    </div>
 
+                </section>
+
+                <!-- ====== BULK ACTIONS ====== -->
+                <section id="bulkActionsManager" style="display:none;">
+                    <header class="section-head">
+                        <h2>Bulk User Actions</h2>
+                        <div class="section-actions">
+                            <button onclick="changeTab(manageUsers);" class="ghost-btn">
+                                <img src="icons/return.svg" alt="" /> Return
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="settings-card">
+                        <div class="settings-card-head">
+                            <h3 class="settings-card-title">Select Users</h3>
+                            <p class="settings-card-sub">Choose which users to apply bulk actions to</p>
+                        </div>
+
+                        <div class="inline-actions" style="margin-bottom: 12px;">
+                            <button type="button" id="bulkSelectAll" class="ghost-btn small">
+                                <img src="icons/manageUsers.svg" alt=""> Select All
+                            </button>
+                            <button type="button" id="bulkUnselectAll" class="ghost-btn small">
+                                <img src="icons/manageUsers.svg" alt=""> Unselect All
+                            </button>
+                        </div>
+
+                        <div id="bulkUsersList" class="user-select-list"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="settings-card-head">
+                            <h3 class="settings-card-title">Actions</h3>
+                            <p class="settings-card-sub">Perform actions on selected users</p>
+                        </div>
+
+                        <!-- Alliance -->
+                        <div class="field">
+                            <label for="bulkAllianceUuid">Join Alliance</label>
+                            <input id="bulkAllianceUuid" type="text" placeholder="Paste alliance UUID here (e.g., 01xxc1c1-1xxx-7xx6-913a-a84xxxx5a83e)" />
+                            <small class="help">All selected users will join this alliance</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="bulkJoinAlliance" class="secondary-button">
+                                <img src="icons/addUser.svg" alt=""/>Join Alliance (Selected Users)
+                            </button>
+                        </div>
+
+                        <!-- Discord -->
+                        <div class="field" style="margin-top: 16px;">
+                            <label for="bulkDiscord">Set Discord Username</label>
+                            <input id="bulkDiscord" type="text" maxlength="15" placeholder="Discord username (max 15 chars)" />
+                            <small class="help">Set the same Discord username for all selected users</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="bulkSetDiscord" class="secondary-button">
+                                <img src="icons/pencil.svg" alt=""/>Set Discord (Selected Users)
+                            </button>
+                        </div>
+
+                        <!-- Show Last Pixel -->
+                        <div class="field" style="margin-top: 16px;">
+                            <label>Show Last Pixel Setting</label>
+                            <small class="help">Enable or disable "Show last pixel" for selected users</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="bulkEnableShowPixel" class="secondary-button">
+                                <img src="icons/check.svg" alt=""/>Enable Show Last Pixel (Selected Users)
+                            </button>
+                            <button type="button" id="bulkDisableShowPixel" class="secondary-button">
+                                <img src="icons/remove.svg" alt=""/>Disable Show Last Pixel (Selected Users)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="bulkActionProgress" class="summary" style="margin-top: 16px; display: none;"></div>
                 </section>
 
                 <!-- ====== AUTO REGISTER ====== -->

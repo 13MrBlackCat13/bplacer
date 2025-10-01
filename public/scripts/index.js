@@ -6122,6 +6122,20 @@ const usersColorsLastCheckLabel = $("usersColorsLastCheckLabel");
 const checkColorsAll = $("checkColorsAll");
 const loadColorsCacheBtn = $("loadColorsCache");
 
+// Bulk Actions Manager
+const bulkActionsManager = $("bulkActionsManager");
+const openBulkActions = $("openBulkActions");
+const bulkUsersList = $("bulkUsersList");
+const bulkSelectAll = $("bulkSelectAll");
+const bulkUnselectAll = $("bulkUnselectAll");
+const bulkJoinAlliance = $("bulkJoinAlliance");
+const bulkAllianceUuid = $("bulkAllianceUuid");
+const bulkSetDiscord = $("bulkSetDiscord");
+const bulkDiscord = $("bulkDiscord");
+const bulkEnableShowPixel = $("bulkEnableShowPixel");
+const bulkDisableShowPixel = $("bulkDisableShowPixel");
+const bulkActionProgress = $("bulkActionProgress");
+
 function buildAllColorsPalette() {
     if (!paletteAllColors) return;
     const items = COLORS.filter(c => c.id !== 0);
@@ -6740,6 +6754,420 @@ if (exportJwtBtn) {
         }
     });
 }
+
+// ====== BULK ACTIONS MANAGER ======
+
+// Helper to get selected user IDs
+function getSelectedBulkUsers() {
+    const checkboxes = bulkUsersList?.querySelectorAll('input[type="checkbox"]:checked') || [];
+    return Array.from(checkboxes).map(cb => cb.value);
+}
+
+// Load users list for bulk actions
+async function loadBulkUsersList() {
+    try {
+        const { data: usersData } = await axios.get('/users');
+        if (!bulkUsersList) return;
+
+        const userEntries = Object.entries(usersData);
+        if (userEntries.length === 0) {
+            bulkUsersList.innerHTML = '<span class="muted">No users available</span>';
+            return;
+        }
+
+        bulkUsersList.innerHTML = userEntries.map(([id, u]) => {
+            const last = LAST_USER_STATUS?.[id] || {};
+            const charges = typeof last.charges === 'number' ? last.charges : '-';
+            const max = typeof last.max === 'number' ? last.max : '-';
+            const drops = typeof last.droplets === 'number' ? last.droplets : '-';
+
+            return `
+                <div class="user-select-item">
+                    <input type="checkbox" id="bulk_user_${id}" value="${id}">
+                    <label for="bulk_user_${id}">
+                        ${u.name || `User ${id}`} <span class="muted">(#${id})</span>
+                    </label>
+                    <span class="drops-badge" title="Charges: ${charges}/${max}, Droplets: ${drops}">
+                        ${charges}/${max} px | ${drops} drops
+                    </span>
+                </div>`;
+        }).join('');
+    } catch (error) {
+        console.error('Failed to load users for bulk actions:', error);
+        if (bulkUsersList) bulkUsersList.innerHTML = '<span class="muted">Failed to load users</span>';
+    }
+}
+
+// Open Bulk Actions
+openBulkActions?.addEventListener('click', async () => {
+    await loadBulkUsersList();
+    changeTab(bulkActionsManager);
+});
+
+// Select/Unselect All
+bulkSelectAll?.addEventListener('click', () => {
+    bulkUsersList?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+});
+
+bulkUnselectAll?.addEventListener('click', () => {
+    bulkUsersList?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+});
+
+// Bulk Join Alliance
+bulkJoinAlliance?.addEventListener('click', async () => {
+    const uuid = bulkAllianceUuid?.value?.trim();
+    if (!uuid) {
+        showMessage('Error', 'Please enter an alliance UUID');
+        return;
+    }
+
+    const selectedUsers = getSelectedBulkUsers();
+    if (selectedUsers.length === 0) {
+        showMessage('Error', 'Please select at least one user');
+        return;
+    }
+
+    // Get users data
+    let usersData = {};
+    try {
+        const response = await axios.get('/users');
+        usersData = response.data || {};
+    } catch (error) {
+        showMessage('Error', 'Failed to load users data');
+        return;
+    }
+
+    const originalText = bulkJoinAlliance.innerHTML;
+    bulkJoinAlliance.disabled = true;
+    let successCount = 0;
+    let failCount = 0;
+    const failedUsers = [];
+
+    if (bulkActionProgress) {
+        bulkActionProgress.style.display = 'block';
+        bulkActionProgress.innerHTML = `<p>Joining alliance for ${selectedUsers.length} users...</p>`;
+    }
+
+    for (let i = 0; i < selectedUsers.length; i++) {
+        const userId = selectedUsers[i];
+        const userName = usersData[userId]?.name || `#${userId}`;
+
+        // Update progress immediately
+        if (bulkActionProgress) {
+            bulkActionProgress.innerHTML = `
+                <p>Processing: ${userName} (${i + 1}/${selectedUsers.length})</p>
+                <p>Success: ${successCount} | Failed: ${failCount}</p>
+            `;
+        }
+
+        try {
+            const response = await axios.post(`/user/${userId}/alliance/join`, { uuid });
+            if (response.status === 200) {
+                successCount++;
+            } else {
+                failCount++;
+                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+            }
+        } catch (error) {
+            failCount++;
+            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
+            const statusCode = error.response?.status || 'N/A';
+            failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
+            console.error(`Failed to join alliance for user ${userId} (${userName}):`, errorMsg);
+        }
+
+        // Small delay to prevent overwhelming the UI
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    bulkJoinAlliance.disabled = false;
+    bulkJoinAlliance.innerHTML = originalText;
+
+    if (bulkActionProgress) {
+        let failedList = '';
+        if (failedUsers.length > 0) {
+            failedList = `<div style="margin-top: 8px; max-height: 200px; overflow-y: auto; text-align: left;">
+                <p><b>Failed users:</b></p>
+                ${failedUsers.map(f => `<p class="muted" style="font-size: 12px; margin: 4px 0;">
+                    ${f.userName} - ${f.error}
+                </p>`).join('')}
+            </div>`;
+        }
+
+        bulkActionProgress.innerHTML = `
+            <p><b>Complete!</b></p>
+            <p>Successfully joined: ${successCount}</p>
+            <p>Failed: ${failCount}</p>
+            ${failedList}
+        `;
+    }
+
+    showMessage('Bulk Action Complete', `Joined alliance for ${successCount} users. ${failCount} failed.`);
+});
+
+// Bulk Set Discord
+bulkSetDiscord?.addEventListener('click', async () => {
+    const discord = bulkDiscord?.value?.trim();
+    if (!discord) {
+        showMessage('Error', 'Please enter a Discord username');
+        return;
+    }
+
+    const selectedUsers = getSelectedBulkUsers();
+    if (selectedUsers.length === 0) {
+        showMessage('Error', 'Please select at least one user');
+        return;
+    }
+
+    // Get users data
+    let usersData = {};
+    try {
+        const response = await axios.get('/users');
+        usersData = response.data || {};
+    } catch (error) {
+        showMessage('Error', 'Failed to load users data');
+        return;
+    }
+
+    const originalText = bulkSetDiscord.innerHTML;
+    bulkSetDiscord.disabled = true;
+    let successCount = 0;
+    let failCount = 0;
+    const failedUsers = [];
+
+    if (bulkActionProgress) {
+        bulkActionProgress.style.display = 'block';
+        bulkActionProgress.innerHTML = `<p>Setting Discord for ${selectedUsers.length} users...</p>`;
+    }
+
+    for (let i = 0; i < selectedUsers.length; i++) {
+        const userId = selectedUsers[i];
+        const userName = usersData[userId]?.name || `#${userId}`;
+
+        // Update progress immediately
+        if (bulkActionProgress) {
+            bulkActionProgress.innerHTML = `
+                <p>Processing: ${userName} (${i + 1}/${selectedUsers.length})</p>
+                <p>Success: ${successCount} | Failed: ${failCount}</p>
+            `;
+        }
+
+        try {
+            const response = await axios.put(`/user/${userId}/update-profile`, { discord });
+            if (response.status === 200) {
+                successCount++;
+            } else {
+                failCount++;
+                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+            }
+        } catch (error) {
+            failCount++;
+            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
+            const statusCode = error.response?.status || 'N/A';
+            failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
+            console.error(`Failed to set Discord for user ${userId} (${userName}):`, errorMsg);
+        }
+
+        // Small delay to prevent overwhelming the UI
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    bulkSetDiscord.disabled = false;
+    bulkSetDiscord.innerHTML = originalText;
+
+    if (bulkActionProgress) {
+        let failedList = '';
+        if (failedUsers.length > 0) {
+            failedList = `<div style="margin-top: 8px; max-height: 200px; overflow-y: auto; text-align: left;">
+                <p><b>Failed users:</b></p>
+                ${failedUsers.map(f => `<p class="muted" style="font-size: 12px; margin: 4px 0;">
+                    ${f.userName} - ${f.error}
+                </p>`).join('')}
+            </div>`;
+        }
+
+        bulkActionProgress.innerHTML = `
+            <p><b>Complete!</b></p>
+            <p>Successfully updated: ${successCount}</p>
+            <p>Failed: ${failCount}</p>
+            ${failedList}
+        `;
+    }
+
+    showMessage('Bulk Action Complete', `Updated Discord for ${successCount} users. ${failCount} failed.`);
+});
+
+// Bulk Enable Show Last Pixel
+bulkEnableShowPixel?.addEventListener('click', async () => {
+    const selectedUsers = getSelectedBulkUsers();
+    if (selectedUsers.length === 0) {
+        showMessage('Error', 'Please select at least one user');
+        return;
+    }
+
+    // Get users data
+    let usersData = {};
+    try {
+        const response = await axios.get('/users');
+        usersData = response.data || {};
+    } catch (error) {
+        showMessage('Error', 'Failed to load users data');
+        return;
+    }
+
+    const originalText = bulkEnableShowPixel.innerHTML;
+    bulkEnableShowPixel.disabled = true;
+    let successCount = 0;
+    let failCount = 0;
+    const failedUsers = [];
+
+    if (bulkActionProgress) {
+        bulkActionProgress.style.display = 'block';
+        bulkActionProgress.innerHTML = `<p>Enabling Show Last Pixel for ${selectedUsers.length} users...</p>`;
+    }
+
+    for (let i = 0; i < selectedUsers.length; i++) {
+        const userId = selectedUsers[i];
+        const userName = usersData[userId]?.name || `#${userId}`;
+
+        // Update progress immediately
+        if (bulkActionProgress) {
+            bulkActionProgress.innerHTML = `
+                <p>Processing: ${userName} (${i + 1}/${selectedUsers.length})</p>
+                <p>Success: ${successCount} | Failed: ${failCount}</p>
+            `;
+        }
+
+        try {
+            const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: true });
+            if (response.status === 200) {
+                successCount++;
+            } else {
+                failCount++;
+                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+            }
+        } catch (error) {
+            failCount++;
+            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
+            const statusCode = error.response?.status || 'N/A';
+            failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
+            console.error(`Failed to enable Show Last Pixel for user ${userId} (${userName}):`, errorMsg);
+        }
+
+        // Small delay to prevent overwhelming the UI
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    bulkEnableShowPixel.disabled = false;
+    bulkEnableShowPixel.innerHTML = originalText;
+
+    if (bulkActionProgress) {
+        let failedList = '';
+        if (failedUsers.length > 0) {
+            failedList = `<div style="margin-top: 8px; max-height: 200px; overflow-y: auto; text-align: left;">
+                <p><b>Failed users:</b></p>
+                ${failedUsers.map(f => `<p class="muted" style="font-size: 12px; margin: 4px 0;">
+                    ${f.userName} - ${f.error}
+                </p>`).join('')}
+            </div>`;
+        }
+
+        bulkActionProgress.innerHTML = `
+            <p><b>Complete!</b></p>
+            <p>Successfully enabled: ${successCount}</p>
+            <p>Failed: ${failCount}</p>
+            ${failedList}
+        `;
+    }
+
+    showMessage('Bulk Action Complete', `Enabled Show Last Pixel for ${successCount} users. ${failCount} failed.`);
+});
+
+// Bulk Disable Show Last Pixel
+bulkDisableShowPixel?.addEventListener('click', async () => {
+    const selectedUsers = getSelectedBulkUsers();
+    if (selectedUsers.length === 0) {
+        showMessage('Error', 'Please select at least one user');
+        return;
+    }
+
+    // Get users data
+    let usersData = {};
+    try {
+        const response = await axios.get('/users');
+        usersData = response.data || {};
+    } catch (error) {
+        showMessage('Error', 'Failed to load users data');
+        return;
+    }
+
+    const originalText = bulkDisableShowPixel.innerHTML;
+    bulkDisableShowPixel.disabled = true;
+    let successCount = 0;
+    let failCount = 0;
+    const failedUsers = [];
+
+    if (bulkActionProgress) {
+        bulkActionProgress.style.display = 'block';
+        bulkActionProgress.innerHTML = `<p>Disabling Show Last Pixel for ${selectedUsers.length} users...</p>`;
+    }
+
+    for (let i = 0; i < selectedUsers.length; i++) {
+        const userId = selectedUsers[i];
+        const userName = usersData[userId]?.name || `#${userId}`;
+
+        // Update progress immediately
+        if (bulkActionProgress) {
+            bulkActionProgress.innerHTML = `
+                <p>Processing: ${userName} (${i + 1}/${selectedUsers.length})</p>
+                <p>Success: ${successCount} | Failed: ${failCount}</p>
+            `;
+        }
+
+        try {
+            const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: false });
+            if (response.status === 200) {
+                successCount++;
+            } else {
+                failCount++;
+                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+            }
+        } catch (error) {
+            failCount++;
+            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
+            const statusCode = error.response?.status || 'N/A';
+            failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
+            console.error(`Failed to disable Show Last Pixel for user ${userId} (${userName}):`, errorMsg);
+        }
+
+        // Small delay to prevent overwhelming the UI
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    bulkDisableShowPixel.disabled = false;
+    bulkDisableShowPixel.innerHTML = originalText;
+
+    if (bulkActionProgress) {
+        let failedList = '';
+        if (failedUsers.length > 0) {
+            failedList = `<div style="margin-top: 8px; max-height: 200px; overflow-y: auto; text-align: left;">
+                <p><b>Failed users:</b></p>
+                ${failedUsers.map(f => `<p class="muted" style="font-size: 12px; margin: 4px 0;">
+                    ${f.userName} - ${f.error}
+                </p>`).join('')}
+            </div>`;
+        }
+
+        bulkActionProgress.innerHTML = `
+            <p><b>Complete!</b></p>
+            <p>Successfully disabled: ${successCount}</p>
+            <p>Failed: ${failCount}</p>
+            ${failedList}
+        `;
+    }
+
+    showMessage('Bulk Action Complete', `Disabled Show Last Pixel for ${successCount} users. ${failCount} failed.`);
+});
 
 //Used for time estimation, converting seconds value to more readable format
 function formatTime(seconds) {
