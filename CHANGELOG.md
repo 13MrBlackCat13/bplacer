@@ -1,3 +1,43 @@
+## Changelog v4.3.11
+Enhanced credential import with proxy support, color highlighting in preview, and community contribution templates.
+
+### New Features:
+- **Interactive Color Highlighting**: Click on any color in the palette to highlight all pixels of that color on the preview
+  - 🟣 Magenta highlight for unplaced pixels (pixels that need to be placed)
+  - 🟢 Green highlight for already placed pixels
+  - Works on both Add Template page and Manage Templates preview
+  - Automatically loads preview when clicking a color if not already visible
+  - Click again to deselect and remove highlight
+- **GitHub Community Templates**:
+  - Added bug report issue template with environment and configuration fields
+  - Added feature request template with use case and benefits sections
+  - Added CONTRIBUTING.md with development setup, coding guidelines, and testing instructions
+
+### Improvements:
+- **Credential Import Enhancements**:
+  - Reduced batch size from 6 to 2 concurrent requests to prevent rate limiting
+  - Added 15-second delay between batches for better rate limit compliance
+  - Enabled automatic proxy rotation for import requests (useProxy: true)
+  - Each login request now uses a different proxy for better distribution
+- **UI/UX**:
+  - Added hover effects on palette color items (border highlight, elevation)
+  - Color items now show cursor pointer to indicate clickability
+  - Selected colors get blue border with shadow effect
+  - Clickable palette items have smooth transitions
+
+### Bug Fixes:
+- Fixed `ReferenceError: LAST_USER_STATUS is not defined` error when starting templates
+- Created `UserStatusCache` to properly track user droplets and extraColorsBitmap data
+- UserStatusCache now updates alongside ChargeCache when loading user info
+
+### Technical Changes:
+- Modified `loginWithCredentials()` to accept `useProxy` parameter for proxy rotation
+- Added proxy support via `cfClearanceManager.getClearance()` with proxy info
+- Frontend now passes `useProxy: true` when importing credentials
+- Created new cache system for user status (droplets, color ownership)
+- Refactored color highlighting with separate state management
+- Added `highlightedColorId` state for both Add Template and Manage Templates pages
+
 ## Changelog v4.3.10
 Improved heatmap visualization with rainbow gradient, better bulk action error messages, and credentials import.
 

@@ -926,6 +926,8 @@ const fetchCanvas = async (txVal, tyVal, pxVal, pyVal, width, height) => {
     if (RID !== previewRenderId) return;
     if (RID !== previewRenderId) return;
 
+    // Cache the canvas buffer for color highlighting
+    canvasBuffer = buffer;
 
     previewCanvas.width = displayWidth;
     previewCanvas.height = displayHeight;
@@ -938,6 +940,11 @@ const fetchCanvas = async (txVal, tyVal, pxVal, pyVal, width, height) => {
     ctx.globalAlpha = 0.5;
     ctx.drawImage(templateCanvas, radius, radius);
     ctx.globalAlpha = 1;
+
+    // Apply color highlight if any color is selected
+    if (highlightedColorId !== null) {
+        highlightUnplacedPixels(ctx, displayWidth, displayHeight, radius);
+    }
 };
 
 
@@ -1302,7 +1309,30 @@ async function showManageTemplatePreview(t) {
                 const [r, g, b] = (rgbKey || '0,0,0').split(',').map(n => parseInt(n, 10) || 0);
                 const textColor = getContrastColor(r, g, b);
                 const cell = document.createElement('div');
-                cell.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px; border:1px solid var(--border); border-radius:6px; background: var(--bg-2)';
+                cell.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px; border:1px solid var(--border); border-radius:6px; background: var(--bg-2); cursor: pointer; transition: all 0.2s ease;';
+                cell.dataset.colorId = String(cid);
+                cell.className = 'mt-palette-item';
+                cell.title = `Click to highlight unplaced pixels (ID ${cid})`;
+
+                // Add hover effect
+                cell.addEventListener('mouseenter', () => {
+                    if (!cell.classList.contains('selected')) {
+                        cell.style.borderColor = 'var(--primary)';
+                        cell.style.transform = 'translateY(-1px)';
+                    }
+                });
+                cell.addEventListener('mouseleave', () => {
+                    if (!cell.classList.contains('selected')) {
+                        cell.style.borderColor = 'var(--border)';
+                        cell.style.transform = 'none';
+                    }
+                });
+
+                // Add click handler
+                cell.addEventListener('click', () => {
+                    toggleMTColorHighlight(cid, STATE);
+                });
+
                 const sw = document.createElement('div');
                 sw.style.cssText = `width:28px; height:20px; border-radius:4px; background: rgb(${r},${g},${b}); color:${textColor}; display:flex; align-items:center; justify-content:center; font-size:11px;`;
                 sw.textContent = `#${cid}`;
@@ -1371,7 +1401,8 @@ async function showManageTemplatePreview(t) {
         showHeatmap: false,
         heatCount: 0,
         heatMax: 0,
-        heatData: []
+        heatData: [],
+        highlightedColorId: null
     };
 
     function drawOverlayMiniFit() {
@@ -1477,7 +1508,97 @@ async function showManageTemplatePreview(t) {
         }
     }
 
+    // Color highlighting functions
+    function drawHighlightFit() {
+        if (STATE.highlightedColorId === null) return;
 
+        for (let y = 0; y < STATE.h; y++) {
+            for (let x = 0; x < STATE.w; x++) {
+                const templateColorId = STATE.template?.data?.[x]?.[y] ?? 0;
+                if (templateColorId !== STATE.highlightedColorId) continue;
+
+                // Check if pixel is already placed
+                const i = (y * STATE.w + x) * 4;
+                const br = STATE.src[i], bg = STATE.src[i + 1], bb = STATE.src[i + 2], ba = STATE.src[i + 3];
+                const tplRGB = rgbOfId(STATE.highlightedColorId);
+                if (!tplRGB) continue;
+
+                const isPlaced = (ba === 255 && br === tplRGB[0] && bg === tplRGB[1] && bb === tplRGB[2]);
+
+                // Highlight ALL pixels of this color
+                if (isPlaced) {
+                    // Green tint for placed pixels
+                    pctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+                } else {
+                    // Magenta for unplaced pixels
+                    pctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+                }
+                pctx.fillRect(x * STATE.SCALE, y * STATE.SCALE, STATE.SCALE, STATE.SCALE);
+            }
+        }
+    }
+
+    function drawHighlightZoom(sx, sy, vw, vh, cellW, cellH) {
+        if (STATE.highlightedColorId === null) return;
+
+        for (let y = sy; y < sy + vh; y++) {
+            for (let x = sx; x < sx + vw; x++) {
+                const templateColorId = STATE.template?.data?.[x]?.[y] ?? 0;
+                if (templateColorId !== STATE.highlightedColorId) continue;
+
+                // Check if pixel is already placed
+                const i = (y * STATE.w + x) * 4;
+                const br = STATE.src[i], bg = STATE.src[i + 1], bb = STATE.src[i + 2], ba = STATE.src[i + 3];
+                const tplRGB = rgbOfId(STATE.highlightedColorId);
+                if (!tplRGB) continue;
+
+                const isPlaced = (ba === 255 && br === tplRGB[0] && bg === tplRGB[1] && bb === tplRGB[2]);
+
+                // Highlight ALL pixels of this color
+                if (isPlaced) {
+                    // Green tint for placed pixels
+                    pctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+                } else {
+                    // Magenta for unplaced pixels
+                    pctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+                }
+
+                const cx = (x - sx) * cellW;
+                const cy = (y - sy) * cellH;
+                pctx.fillRect(Math.floor(cx), Math.floor(cy), Math.ceil(cellW), Math.ceil(cellH));
+            }
+        }
+    }
+
+    function toggleMTColorHighlight(colorId) {
+        const grid = document.getElementById('mtPreviewPaletteGrid');
+        if (!grid) return;
+
+        const wasSelected = STATE.highlightedColorId === colorId;
+
+        // Clear all selections
+        grid.querySelectorAll('.mt-palette-item').forEach(el => {
+            el.classList.remove('selected');
+            el.style.borderColor = 'var(--border)';
+            el.style.borderWidth = '1px';
+            el.style.boxShadow = 'none';
+        });
+
+        if (wasSelected) {
+            STATE.highlightedColorId = null;
+        } else {
+            STATE.highlightedColorId = colorId;
+            const selectedItem = grid.querySelector(`.mt-palette-item[data-color-id="${colorId}"]`);
+            if (selectedItem) {
+                selectedItem.classList.add('selected');
+                selectedItem.style.borderColor = 'var(--primary)';
+                selectedItem.style.borderWidth = '2px';
+                selectedItem.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.2)';
+            }
+        }
+
+        render();
+    }
 
     function drawFit() {
         pctx.clearRect(0, 0, preview.width, preview.height);
@@ -1486,6 +1607,11 @@ async function showManageTemplatePreview(t) {
         if (STATE.showHeatmap) drawHeatmapFit();
         else if (STATE.highlightMismatch) drawOverlayRedFit();
         else if (STATE.showOverlay) drawOverlayMiniFit();
+
+        // Always draw highlight on top if active
+        if (STATE.highlightedColorId !== null) {
+            drawHighlightFit();
+        }
     }
 
     function drawZoom() {
@@ -1506,6 +1632,11 @@ async function showManageTemplatePreview(t) {
         if (STATE.showHeatmap) drawHeatmapZoom(sx, sy, vw, vh, cellW, cellH);
         else if (STATE.highlightMismatch) drawOverlayRedZoom(sx, sy, vw, vh, cellW, cellH);
         else if (STATE.showOverlay) drawOverlayMiniZoom(sx, sy, vw, vh, cellW, cellH);
+
+        // Always draw highlight on top if active
+        if (STATE.highlightedColorId !== null) {
+            drawHighlightZoom(sx, sy, vw, vh, cellW, cellH);
+        }
     }
 
     function render() {
@@ -5915,7 +6046,9 @@ function renderPalette(template) {
     const list = document.getElementById('paletteList');
     const uniqueEl = document.getElementById('paletteUnique');
     const totalEl = document.getElementById('paletteTotal');
-    if (!list || !uniqueEl || !totalEl) return;
+    if (!list || !uniqueEl || !totalEl) {
+        return;
+    }
 
     const items = computePalette(template);
     uniqueEl.textContent = String(items.length);
@@ -5930,7 +6063,7 @@ function renderPalette(template) {
         const kind = it.isPremium ? 'Premium' : 'Basic';
 
         return `
-      <article class="palette-item" data-id="${it.id}" data-kind="${kind.toLowerCase()}" title="ID ${it.id}">
+      <article class="palette-item palette-clickable" data-id="${it.id}" data-kind="${kind.toLowerCase()}" title="Click to highlight unplaced pixels (ID ${it.id})">
         <div class="swatch" style="background: rgb(${r}, ${g}, ${b}); color: ${textColor}; font-size: 10px;">#${it.id}</div>
         <div class="palette-meta">
             <span class="name">${name}</span>
@@ -5939,12 +6072,233 @@ function renderPalette(template) {
       </article>
     `;
     }).join('');
+
+    // Add click event listeners to palette items
+    const clickableItems = list.querySelectorAll('.palette-item.palette-clickable');
+    clickableItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const colorId = parseInt(item.dataset.id, 10);
+            toggleColorHighlight(colorId);
+        });
+    });
+}
+
+// State for color highlighting
+let highlightedColorId = null;
+let canvasBuffer = null; // Cached canvas data
+
+async function toggleColorHighlight(colorId) {
+    const list = document.getElementById('paletteList');
+    if (!list) return;
+
+    // Toggle selection
+    const clickedItem = list.querySelector(`.palette-item[data-id="${colorId}"]`);
+    if (!clickedItem) return;
+
+    const wasSelected = clickedItem.classList.contains('selected');
+
+    // Clear all selections
+    list.querySelectorAll('.palette-item.selected').forEach(el => el.classList.remove('selected'));
+
+    if (wasSelected) {
+        // Deselect - clear highlight
+        highlightedColorId = null;
+        if (previewCanvas && previewCanvas.style.display !== 'none') {
+            await redrawPreviewWithHighlight();
+        }
+    } else {
+        // Select new color
+        highlightedColorId = colorId;
+        clickedItem.classList.add('selected');
+
+        // If preview is not visible, load it automatically
+        if (!previewCanvas || previewCanvas.style.display === 'none') {
+            const txVal = parseInt(tx.value, 10);
+            const tyVal = parseInt(ty.value, 10);
+            const pxVal = parseInt(px.value, 10);
+            const pyVal = parseInt(py.value, 10);
+
+            if (!isNaN(txVal) && !isNaN(tyVal) && !isNaN(pxVal) && !isNaN(pyVal) && currentTemplate.width > 0) {
+                try {
+                    if (previewCanvasButton) {
+                        previewCanvasButton.disabled = true;
+                        previewCanvasButton.innerHTML = '<img src="icons/eye.svg" alt="" /> Loading...';
+                    }
+                    await fetchCanvas(txVal, tyVal, pxVal, pyVal, currentTemplate.width, currentTemplate.height);
+                    if (previewCanvas) {
+                        previewCanvas.style.display = "block";
+                    }
+                } catch (e) {
+                    console.error('Error loading preview:', e);
+                } finally {
+                    if (previewCanvasButton) {
+                        previewCanvasButton.disabled = false;
+                        previewCanvasButton.innerHTML = '<img src="icons/eye.svg" alt="" /> Preview Canvas';
+                    }
+                }
+            }
+        } else {
+            // Preview is already visible, just redraw with highlight
+            await redrawPreviewWithHighlight();
+        }
+    }
+}
+
+async function redrawPreviewWithHighlight() {
+    if (!previewCanvas || previewCanvas.style.display === 'none') {
+        // Preview not visible, do nothing
+        return;
+    }
+
+    const txVal = parseInt(tx.value, 10);
+    const tyVal = parseInt(ty.value, 10);
+    const pxVal = parseInt(px.value, 10);
+    const pyVal = parseInt(py.value, 10);
+
+    if (isNaN(txVal) || isNaN(tyVal) || isNaN(pxVal) || isNaN(pyVal) || currentTemplate.width === 0) {
+        return;
+    }
+
+    const TILE_SIZE = 1000;
+    const radius = Math.max(0, parseInt(previewBorder.value, 10) || 0);
+
+    const startX = txVal * TILE_SIZE + pxVal - radius;
+    const startY = tyVal * TILE_SIZE + pyVal - radius;
+    const displayWidth = currentTemplate.width + radius * 2;
+    const displayHeight = currentTemplate.height + radius * 2;
+
+    // Get canvas data if not cached
+    if (!canvasBuffer) {
+        const ctx = previewCanvas.getContext('2d');
+        // Extract only the canvas part (without template overlay)
+        // We need to reload the canvas tiles
+        await loadCanvasData(txVal, tyVal, pxVal, pyVal, displayWidth, displayHeight, startX, startY);
+    }
+
+    // Redraw preview
+    const ctx = previewCanvas.getContext('2d');
+    ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+    // Draw canvas from buffer
+    if (canvasBuffer) {
+        ctx.drawImage(canvasBuffer, 0, 0);
+    }
+
+    // Draw template overlay with alpha
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(templateCanvas, radius, radius);
+    ctx.globalAlpha = 1;
+
+    // Highlight selected color's unplaced pixels
+    if (highlightedColorId !== null) {
+        highlightUnplacedPixels(ctx, displayWidth, displayHeight, radius);
+    }
+}
+
+async function loadCanvasData(txVal, tyVal, pxVal, pyVal, displayWidth, displayHeight, startX, startY) {
+    const TILE_SIZE = 1000;
+    const endX = startX + displayWidth;
+    const endY = startY + displayHeight;
+
+    const startTileX = Math.floor(startX / TILE_SIZE);
+    const startTileY = Math.floor(startY / TILE_SIZE);
+    const endTileX = Math.floor((endX - 1) / TILE_SIZE);
+    const endTileY = Math.floor((endY - 1) / TILE_SIZE);
+
+    const buffer = document.createElement('canvas');
+    buffer.width = displayWidth;
+    buffer.height = displayHeight;
+    const bctx = buffer.getContext('2d');
+    bctx.imageSmoothingEnabled = false;
+
+    const tileTasks = [];
+    const concurrency = 8;
+    for (let txi = startTileX; txi <= endTileX; txi++) {
+        for (let tyi = startTileY; tyi <= endTileY; tyi++) {
+            tileTasks.push(async () => {
+                try {
+                    const { data } = await axios.get('/canvas', { params: { tx: txi, ty: tyi } });
+                    const img = new Image();
+                    img.src = data.image;
+                    await img.decode();
+
+                    const sx = (txi === startTileX) ? startX - txi * TILE_SIZE : 0;
+                    const sy = (tyi === startTileY) ? startY - tyi * TILE_SIZE : 0;
+                    const ex = (txi === endTileX) ? endX - txi * TILE_SIZE : TILE_SIZE;
+                    const ey = (tyi === endTileY) ? endY - tyi * TILE_SIZE : TILE_SIZE;
+                    const sw = ex - sx;
+                    const sh = ey - sy;
+                    const dx = txi * TILE_SIZE + sx - startX;
+                    const dy = tyi * TILE_SIZE + sy - startY;
+
+                    bctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+                } catch (error) {
+                    console.error('Error loading tile:', error);
+                }
+            });
+        }
+    }
+    await processInParallel(tileTasks, concurrency);
+    canvasBuffer = buffer;
+}
+
+function highlightUnplacedPixels(ctx, displayWidth, displayHeight, radius) {
+    if (!canvasBuffer || highlightedColorId === null) return;
+
+    const bctx = canvasBuffer.getContext('2d');
+    const canvasData = bctx.getImageData(0, 0, displayWidth, displayHeight).data;
+
+    // Get RGB for selected color
+    const colorRgbStr = colorById(highlightedColorId);
+    if (!colorRgbStr) return;
+    const [targetR, targetG, targetB] = colorRgbStr.split(',').map(n => parseInt(n, 10));
+
+    // Check each pixel in template
+    for (let y = 0; y < currentTemplate.height; y++) {
+        for (let x = 0; x < currentTemplate.width; x++) {
+            const templateColorId = currentTemplate.data[x][y];
+
+            // Only process pixels of selected color
+            if (templateColorId !== highlightedColorId) continue;
+
+            // Check if this pixel is already placed on canvas
+            const canvasX = x + radius;
+            const canvasY = y + radius;
+            const i = (canvasY * displayWidth + canvasX) * 4;
+
+            const canvasR = canvasData[i];
+            const canvasG = canvasData[i + 1];
+            const canvasB = canvasData[i + 2];
+            const canvasA = canvasData[i + 3];
+
+            // Check if pixel is placed
+            const isPlaced = canvasA === 255 &&
+                           canvasR === targetR &&
+                           canvasG === targetG &&
+                           canvasB === targetB;
+
+            // Highlight ALL pixels of this color (placed and unplaced)
+            // Use different colors for placed vs unplaced
+            if (isPlaced) {
+                // Green tint for placed pixels
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+            } else {
+                // Magenta for unplaced pixels
+                ctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+            }
+            ctx.fillRect(canvasX, canvasY, 1, 1);
+        }
+    }
 }
 
 function killPreviewPipelines() {
     // invalidate async fetches/previews
     if (typeof previewRenderId !== 'undefined') previewRenderId++;
     if (typeof MT_PREVIEW_RENDER_ID !== 'undefined') MT_PREVIEW_RENDER_ID++;
+
+    // Clear color highlight state
+    highlightedColorId = null;
+    canvasBuffer = null;
 
     // fade-out visible canvases
     if (previewCanvas) {

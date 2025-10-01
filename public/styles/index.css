@@ -1779,6 +1779,25 @@ p.credits a img {
     background: var(--bg-2);
 }
 
+.palette-item.palette-clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.palette-item.palette-clickable:hover {
+    background: var(--bg-3);
+    border-color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.palette-item.palette-clickable.selected {
+    background: var(--primary-bg);
+    border-color: var(--primary);
+    border-width: 2px;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
 .swatch {
     width: 24px;
     height: 24px;

@@ -846,6 +846,26 @@ const ChargeCache = {
   }
 };
 
+// Cache for user status (droplets, extraColorsBitmap)
+const UserStatusCache = {
+  _m: new Map(),
+  _key(id) { return String(id); },
+
+  has(id) { return this._m.has(this._key(id)); },
+  get(id) { return this._m.get(this._key(id)) || null; },
+  markFromUserInfo(userInfo) {
+    if (!userInfo?.id) return;
+    const k = this._key(userInfo.id);
+    this._m.set(k, {
+      droplets: Number(userInfo.droplets || 0),
+      extraColorsBitmap: String(userInfo.extraColorsBitmap || "0")
+    });
+  },
+  clearAll() {
+    this._m.clear();
+  }
+};
+
 let loadedProxies = [];
 // map: proxy idx -> timestamp (ms) until which proxy is quarantined (skipped)
 const proxyQuarantine = new Map();
@@ -1199,6 +1219,7 @@ class WPlacer {
           this.userId = userInfo.id;
         }
         try { ChargeCache.markFromUserInfo(userInfo); } catch { }
+        try { UserStatusCache.markFromUserInfo(userInfo); } catch { }
         return true;
       }
       throw new Error(`❌ Unexpected JSON from /me (status ${status}): ${JSON.stringify(userInfo).slice(0, 200)}...`);
@@ -3034,8 +3055,9 @@ class TemplateManager {
             let canPaint = true;
             if (this.autoBuyNeededColors && this.templatePremiumColors && this.templatePremiumColors.size > 0) {
               const reserve = currentSettings.dropletReserve || 0;
-              const userDroplets = Number(LAST_USER_STATUS[userId]?.droplets || 0);
-              const userBitmap = LAST_USER_STATUS[userId]?.extraColorsBitmap || "0";
+              const userStatus = UserStatusCache.get(userId);
+              const userDroplets = Number(userStatus?.droplets || 0);
+              const userBitmap = userStatus?.extraColorsBitmap || "0";
 
               // Check if user owns at least one needed premium color
               let hasAnyNeededColor = false;
