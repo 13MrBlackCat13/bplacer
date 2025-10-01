@@ -6864,18 +6864,42 @@ bulkJoinAlliance?.addEventListener('click', async () => {
             `;
         }
 
-        try {
-            const response = await axios.post(`/user/${userId}/alliance/join`, { uuid });
-            if (response.status === 200) {
-                successCount++;
-            } else {
-                failCount++;
-                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+        let success = false;
+        let lastError = null;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 seconds
+
+        for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
+            try {
+                if (bulkActionProgress && attempt > 1) {
+                    bulkActionProgress.innerHTML = `
+                        <p>Processing: ${userName} (${i + 1}/${selectedUsers.length}) - Retry ${attempt}/${maxRetries}</p>
+                        <p>Success: ${successCount} | Failed: ${failCount}</p>
+                    `;
+                }
+
+                const response = await axios.post(`/user/${userId}/alliance/join`, { uuid });
+                if (response.status === 200) {
+                    successCount++;
+                    success = true;
+                }
+            } catch (error) {
+                const statusCode = error.response?.status || 0;
+                lastError = error;
+
+                // Retry only on 409 (user currently active)
+                if (statusCode === 409 && attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                }
+                break;
             }
-        } catch (error) {
+        }
+
+        if (!success && lastError) {
             failCount++;
-            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
-            const statusCode = error.response?.status || 'N/A';
+            const errorMsg = lastError.response?.data?.error || lastError.response?.statusText || lastError.message || 'Unknown error';
+            const statusCode = lastError.response?.status || 'N/A';
             failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
             console.error(`Failed to join alliance for user ${userId} (${userName}):`, errorMsg);
         }
@@ -6956,18 +6980,41 @@ bulkSetDiscord?.addEventListener('click', async () => {
             `;
         }
 
-        try {
-            const response = await axios.put(`/user/${userId}/update-profile`, { discord });
-            if (response.status === 200) {
-                successCount++;
-            } else {
-                failCount++;
-                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+        let success = false;
+        let lastError = null;
+        const maxRetries = 3;
+        const retryDelay = 2000;
+
+        for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
+            try {
+                if (bulkActionProgress && attempt > 1) {
+                    bulkActionProgress.innerHTML = `
+                        <p>Processing: ${userName} (${i + 1}/${selectedUsers.length}) - Retry ${attempt}/${maxRetries}</p>
+                        <p>Success: ${successCount} | Failed: ${failCount}</p>
+                    `;
+                }
+
+                const response = await axios.put(`/user/${userId}/update-profile`, { discord });
+                if (response.status === 200) {
+                    successCount++;
+                    success = true;
+                }
+            } catch (error) {
+                const statusCode = error.response?.status || 0;
+                lastError = error;
+
+                if (statusCode === 409 && attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                }
+                break;
             }
-        } catch (error) {
+        }
+
+        if (!success && lastError) {
             failCount++;
-            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
-            const statusCode = error.response?.status || 'N/A';
+            const errorMsg = lastError.response?.data?.error || lastError.response?.statusText || lastError.message || 'Unknown error';
+            const statusCode = lastError.response?.status || 'N/A';
             failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
             console.error(`Failed to set Discord for user ${userId} (${userName}):`, errorMsg);
         }
@@ -7042,18 +7089,41 @@ bulkEnableShowPixel?.addEventListener('click', async () => {
             `;
         }
 
-        try {
-            const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: true });
-            if (response.status === 200) {
-                successCount++;
-            } else {
-                failCount++;
-                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+        let success = false;
+        let lastError = null;
+        const maxRetries = 3;
+        const retryDelay = 2000;
+
+        for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
+            try {
+                if (bulkActionProgress && attempt > 1) {
+                    bulkActionProgress.innerHTML = `
+                        <p>Processing: ${userName} (${i + 1}/${selectedUsers.length}) - Retry ${attempt}/${maxRetries}</p>
+                        <p>Success: ${successCount} | Failed: ${failCount}</p>
+                    `;
+                }
+
+                const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: true });
+                if (response.status === 200) {
+                    successCount++;
+                    success = true;
+                }
+            } catch (error) {
+                const statusCode = error.response?.status || 0;
+                lastError = error;
+
+                if (statusCode === 409 && attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                }
+                break;
             }
-        } catch (error) {
+        }
+
+        if (!success && lastError) {
             failCount++;
-            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
-            const statusCode = error.response?.status || 'N/A';
+            const errorMsg = lastError.response?.data?.error || lastError.response?.statusText || lastError.message || 'Unknown error';
+            const statusCode = lastError.response?.status || 'N/A';
             failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
             console.error(`Failed to enable Show Last Pixel for user ${userId} (${userName}):`, errorMsg);
         }
@@ -7128,18 +7198,41 @@ bulkDisableShowPixel?.addEventListener('click', async () => {
             `;
         }
 
-        try {
-            const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: false });
-            if (response.status === 200) {
-                successCount++;
-            } else {
-                failCount++;
-                failedUsers.push({ userId, userName, error: `Status ${response.status}` });
+        let success = false;
+        let lastError = null;
+        const maxRetries = 3;
+        const retryDelay = 2000;
+
+        for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
+            try {
+                if (bulkActionProgress && attempt > 1) {
+                    bulkActionProgress.innerHTML = `
+                        <p>Processing: ${userName} (${i + 1}/${selectedUsers.length}) - Retry ${attempt}/${maxRetries}</p>
+                        <p>Success: ${successCount} | Failed: ${failCount}</p>
+                    `;
+                }
+
+                const response = await axios.put(`/user/${userId}/update-profile`, { showLastPixel: false });
+                if (response.status === 200) {
+                    successCount++;
+                    success = true;
+                }
+            } catch (error) {
+                const statusCode = error.response?.status || 0;
+                lastError = error;
+
+                if (statusCode === 409 && attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                }
+                break;
             }
-        } catch (error) {
+        }
+
+        if (!success && lastError) {
             failCount++;
-            const errorMsg = error.response?.data?.error || error.response?.statusText || error.message || 'Unknown error';
-            const statusCode = error.response?.status || 'N/A';
+            const errorMsg = lastError.response?.data?.error || lastError.response?.statusText || lastError.message || 'Unknown error';
+            const statusCode = lastError.response?.status || 'N/A';
             failedUsers.push({ userId, userName, error: `${statusCode}: ${errorMsg}` });
             console.error(`Failed to disable Show Last Pixel for user ${userId} (${userName}):`, errorMsg);
         }

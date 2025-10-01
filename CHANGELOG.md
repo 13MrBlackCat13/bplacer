@@ -7,6 +7,9 @@ Improved heatmap visualization with rainbow gradient and better bulk action erro
 - Added alpha fade for older pixels to improve visual clarity
 - Applied gradient to both fit and zoom heatmap modes
 - Improved alliance join error messages (409 now returns "User is currently active")
+- Added automatic retry logic for bulk actions when users are temporarily busy (409 errors)
+- Bulk actions now retry up to 3 times with 2-second delays before marking as failed
+- Progress indicator shows retry attempts during bulk operations
 
 ### Bug Fixes:
 - Fixed bulk alliance join showing generic "Conflict" instead of detailed error message
