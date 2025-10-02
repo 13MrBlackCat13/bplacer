@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/x-icon" href="icons/favicon.png" />
     <link rel="stylesheet" href="styles/index.css" />
-    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <title>wplacer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>
+    <title>bplacer</title>
 
     <!-- Small helper style to highlight selected mode card -->
     <style>
@@ -28,8 +28,7 @@
             width: 64px;
         }
     </style>
-    <script src="https://twemoji.maxcdn.com/v/latest/twemoji.min.js" crossorigin="anonymous"
-        referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>
 </head>
 
 <body>
@@ -40,13 +39,13 @@
     <header class="app-header">
         <div class="brand">
             <img src="icons/favicon.png" alt="" aria-hidden="true" />
-            <span>wplacer</span>
+            <span>bplacer</span>
         </div>
 
         <div class="header-actions">
             <button class="ghost-btn" onclick="changeTab(main)" title="Home">
                 <img src="icons/return.svg" alt="" />
-                <span class="hide-sm">Home</span>
+                <span class="hide-sm">Dashboard</span>
             </button>
             <button class="ghost-btn" onclick="changeTab(settings)" title="Settings">
                 <img src="icons/settings.svg" alt="" />
@@ -104,7 +103,7 @@
         <main class="app-content">
             <div class="container">
                 <!-- ====== HOME ====== -->
-                <h1 class="visually-hidden">wplacer</h1>
+                <h1 class="visually-hidden">bplacer</h1>
                 <section id="main">
                     <div class="hero">
                         <div class="hero-title">
@@ -154,26 +153,6 @@
                                 </div>
                             </button>
                         </div>
-
-                        <!-- Quick Login Form -->
-                        <div class="form-card" style="margin-top: 20px;">
-                            <h3>Quick Add User by Login</h3>
-                            <p class="hero-sub">Add user by username and password</p>
-                            <form id="dashboardQuickLoginForm" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
-                                <div class="field">
-                                    <label for="dashboardUsername">Username</label>
-                                    <input type="text" id="dashboardUsername" placeholder="Enter username" required />
-                                </div>
-                                <div class="field">
-                                    <label for="dashboardPassword">Password</label>
-                                    <input type="password" id="dashboardPassword" placeholder="Enter password" required />
-                                </div>
-                                <button type="submit" class="primary-button">
-                                    <img src="icons/addUser.svg" alt="" />
-                                    Add User
-                                </button>
-                            </form>
-                        </div>
                     </div>
                 </section>
 
@@ -195,24 +174,29 @@
                         </div>
                     </header>
 
-                    <form id="userForm" class="form-card" autocomplete="off">
-                        <div class="field">
-                            <label>Authentication Method</label>
-                            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
-                                <label style="display: flex; align-items: center; gap: 5px;">
-                                    <input type="radio" name="authMethod" value="jwt" checked />
-                                    JWT Token
-                                </label>
-                                <label style="display: flex; align-items: center; gap: 5px;">
-                                    <input type="radio" name="authMethod" value="login" />
-                                    Login/Password
-                                </label>
-                                <label style="display: flex; align-items: center; gap: 5px;">
-                                    <input type="radio" name="authMethod" value="register" />
-                                    Register New Account
-                                </label>
+                        <form id="userForm" class="summary" autocomplete="off">
+                          <div class="auth-field">
+                            <label class="section-title">Authentication Method</label>
+                            <div>
+                              <label class="secondary-button auth-option">
+                                <input type="radio" name="authMethod" value="jwt" checked />
+                                <span>JWT Token</span>
+                              </label>
+                          
+                              <label class="secondary-button auth-option">
+                                <input type="radio" name="authMethod" value="login" />
+                                <span>Login / Password</span>
+                              </label>
+                          
+                              <label class="secondary-button auth-option">
+                                <input type="radio" name="authMethod" value="register" />
+                                <span>Register New Account</span>
+                              </label>
                             </div>
-                        </div>
+                          </div>
+                        </form>
+
+                        <br>
 
                         <div id="jwtFields">
                             <div class="field">
@@ -239,7 +223,7 @@
                             <div class="field">
                                 <label for="regUsername">New Username</label>
                                 <input type="text" id="regUsername" placeholder="Choose username" />
-                                <small class="help">3-20 characters, will be used to create new account.</small>
+                                <small class="help">3-16 characters, will be used to create new account.</small>
                             </div>
                             <div class="field">
                                 <label for="regPassword">New Password</label>
@@ -274,16 +258,14 @@
                             </div>
                         </div>
                         <div class="form-actions">
-                            <button id="buyMaxUpgradesAll" class="primary-button">
-                                <img src="icons/playAll.svg" alt="" />
-                                Buy Max Charge Upgrades (All)
-                            </button>
-                            <button id="buyChargesAll" class="primary-button">
-                                <img src="icons/playAll.svg" alt="" />
-                                Buy paint charges (All)
+                            <button id="openBulkActions" class="primary-button">
+                                <img src="icons/manageUsers.svg" alt="" />
+                                Bulk Actions
                             </button>
                         </div>
                     </form>
+
+                    <br>
 
                     <h3 class="section-title" id="manageUsersTitle">Existing Users</h3>
 
@@ -313,14 +295,6 @@
                     </div>
 
                     <div id="userList" class="cards-grid"></div>
-
-                    <div class="form-actions" style="margin-top: 16px;">
-                        <button id="openBulkActions" class="secondary-button">
-                            <img src="icons/manageUsers.svg" alt="" />
-                            Bulk Actions
-                        </button>
-                    </div>
-
                 </section>
 
                 <!-- ====== BULK ACTIONS ====== -->
@@ -334,12 +308,63 @@
                         </div>
                     </header>
 
-                    <div class="settings-card">
+                    <div class="form-actions">
+                        <button id="buyMaxUpgradesAll" class="primary-button">
+                            <img src="icons/playAll.svg" alt="" />
+                            Buy Max Charge Upgrades (All)
+                        </button>
+                        <button id="buyChargesAll" class="primary-button">
+                            <img src="icons/playAll.svg" alt="" />
+                            Buy paint charges (All)
+                        </button>
+                    </div>
+
+                    <br>
+                                                
+                    <!-- Alliance -->
+                    <div class="field">
+                        <label for="bulkAllianceUuid">Join Alliance</label>
+                        <input id="bulkAllianceUuid" type="text" placeholder="Paste alliance UUID here (e.g., 01xxc1c1-1xxx-7xx6-913a-a84xxxx5a83e)" />
+                        <small class="help">All selected users will join this alliance</small>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="bulkJoinAlliance" class="secondary-button">
+                            <img src="icons/addUser.svg" alt=""/>Join Alliance (Selected Users)
+                        </button>
+                    </div>
+
+                    <!-- Discord -->
+                    <div class="field" style="margin-top: 16px;">
+                        <label for="bulkDiscord">Set Discord Username</label>
+                        <input id="bulkDiscord" type="text" maxlength="15" placeholder="Discord username (max 15 chars)" />
+                        <small class="help">Set the same Discord username for all selected users</small>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="bulkSetDiscord" class="secondary-button">
+                            <img src="icons/pencil.svg" alt=""/>Set Discord (Selected Users)
+                        </button>
+                    </div>
+
+                    <!-- Show Last Pixel -->
+                    <div class="field" style="margin-top: 16px;">
+                        <label>Show Last Pixel Setting</label>
+                        <small class="help">Enable or disable "Show last pixel" for selected users</small>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="bulkEnableShowPixel" class="secondary-button">
+                            <img src="icons/check.svg" alt=""/>Enable Show Last Pixel (Selected Users)
+                        </button>
+                        <button type="button" id="bulkDisableShowPixel" class="secondary-button">
+                            <img src="icons/remove.svg" alt=""/>Disable Show Last Pixel (Selected Users)
+                        </button>
+                    </div>
+                    <br>
+                    <div id="bulkActionProgress" class="summary" style="margin-top: 16px; display: none;"></div>
+                        <div class="settings-card">
                         <div class="settings-card-head">
                             <h3 class="settings-card-title">Select Users</h3>
                             <p class="settings-card-sub">Choose which users to apply bulk actions to</p>
                         </div>
-
                         <div class="inline-actions" style="margin-bottom: 12px;">
                             <button type="button" id="bulkSelectAll" class="ghost-btn small">
                                 <img src="icons/manageUsers.svg" alt=""> Select All
@@ -347,57 +372,8 @@
                             <button type="button" id="bulkUnselectAll" class="ghost-btn small">
                                 <img src="icons/manageUsers.svg" alt=""> Unselect All
                             </button>
+                        <div id="bulkUsersList"></div>
                         </div>
-
-                        <div id="bulkUsersList" class="user-select-list"></div>
-                    </div>
-
-                    <div class="settings-card">
-                        <div class="settings-card-head">
-                            <h3 class="settings-card-title">Actions</h3>
-                            <p class="settings-card-sub">Perform actions on selected users</p>
-                        </div>
-
-                        <!-- Alliance -->
-                        <div class="field">
-                            <label for="bulkAllianceUuid">Join Alliance</label>
-                            <input id="bulkAllianceUuid" type="text" placeholder="Paste alliance UUID here (e.g., 01xxc1c1-1xxx-7xx6-913a-a84xxxx5a83e)" />
-                            <small class="help">All selected users will join this alliance</small>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" id="bulkJoinAlliance" class="secondary-button">
-                                <img src="icons/addUser.svg" alt=""/>Join Alliance (Selected Users)
-                            </button>
-                        </div>
-
-                        <!-- Discord -->
-                        <div class="field" style="margin-top: 16px;">
-                            <label for="bulkDiscord">Set Discord Username</label>
-                            <input id="bulkDiscord" type="text" maxlength="15" placeholder="Discord username (max 15 chars)" />
-                            <small class="help">Set the same Discord username for all selected users</small>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" id="bulkSetDiscord" class="secondary-button">
-                                <img src="icons/pencil.svg" alt=""/>Set Discord (Selected Users)
-                            </button>
-                        </div>
-
-                        <!-- Show Last Pixel -->
-                        <div class="field" style="margin-top: 16px;">
-                            <label>Show Last Pixel Setting</label>
-                            <small class="help">Enable or disable "Show last pixel" for selected users</small>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" id="bulkEnableShowPixel" class="secondary-button">
-                                <img src="icons/check.svg" alt=""/>Enable Show Last Pixel (Selected Users)
-                            </button>
-                            <button type="button" id="bulkDisableShowPixel" class="secondary-button">
-                                <img src="icons/remove.svg" alt=""/>Disable Show Last Pixel (Selected Users)
-                            </button>
-                        </div>
-                    </div>
-
-                    <div id="bulkActionProgress" class="summary" style="margin-top: 16px; display: none;"></div>
                 </section>
 
                 <!-- ====== AUTO REGISTER ====== -->
