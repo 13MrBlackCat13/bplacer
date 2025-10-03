@@ -36,10 +36,7 @@ const quickLoginForm = $("quickLoginForm");
 const quickUsername = $("quickUsername");
 const quickPassword = $("quickPassword");
 
-// Dashboard quick login elements
-const dashboardQuickLoginForm = $("dashboardQuickLoginForm");
-const dashboardUsername = $("dashboardUsername");
-const dashboardPassword = $("dashboardPassword");
+// Auto registration elements
 const startAutoRegister = $("startAutoRegister");
 const regCount = $("regCount");
 const usernameMask = $("usernameMask");
@@ -4606,18 +4603,6 @@ turnstileNotifications.addEventListener('change', async () => {
     }
 });
 
-// Passive notification if server is currently waiting for a token
-try {
-    setTimeout(async () => {
-        try {
-            const { data } = await axios.get('/token-needed');
-            if (data?.needed && turnstileNotifications?.checked) {
-                showMessage("Turnstile", "Problem obtaining token. Please reload the extension and restart the browser. Possible Cloudflare Turnstile error (300030).");
-            }
-        } catch (_) { }
-    }, 1000);
-} catch (_) { }
-
 accountCooldown.addEventListener('change', async () => {
     try {
         const newCooldown = parseInt(accountCooldown.value, 10) * 1000;
@@ -8016,35 +8001,6 @@ quickLoginForm.addEventListener('submit', async (e) => {
         if (response.status === 200) {
             showMessage("Success", `User ${response.data.name} (#${response.data.id}) added successfully!`);
             quickLoginForm.reset();
-            // Refresh manage users if it's open
-            if (manageUsers.style.display !== 'none') {
-                loadUsers();
-            }
-        }
-    } catch (error) {
-        handleError(error);
-    }
-});
-
-// Dashboard quick login form handler
-dashboardQuickLoginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-        const username = dashboardUsername.value.trim();
-        const password = dashboardPassword.value.trim();
-
-        if (!username || !password) {
-            showMessage("Error", "Username and password are required!");
-            return;
-        }
-
-        const response = await axios.post('/user', {
-            credentials: { username, password }
-        });
-
-        if (response.status === 200) {
-            showMessage("Success", `User ${response.data.name} (#${response.data.id}) added successfully!`);
-            dashboardQuickLoginForm.reset();
             // Refresh manage users if it's open
             if (manageUsers.style.display !== 'none') {
                 loadUsers();
