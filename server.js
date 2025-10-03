@@ -2491,6 +2491,10 @@ class TemplateManager {
     this.heatmapEnabled = false;
     this.heatmapLimit = 10000; // default limit
 
+    // Cache for users without needed premium colors and insufficient droplets
+    // Reset when anyone buys a premium color
+    this._skipUsersForPremiumColors = new Set();
+
     this.running = false;
     this._sleepResolver = null;
     this.status = "Waiting to be started.";
@@ -2686,6 +2690,8 @@ class TemplateManager {
         buyer.droplets = Number(w.userInfo?.droplets || (before - COLOR_COST));
         purchasedAny = true;
         bought.push(cid);
+        // Clear skip cache - other users might now be able to paint with this color
+        this._skipUsersForPremiumColors.clear();
       } catch (e) {
         logUserError(e, buyer.id, users[buyer.id].name, `auto-purchase color #${cid}`);
       } finally {
@@ -3051,6 +3057,10 @@ class TemplateManager {
           if (!p) continue;
           const threshold = currentSettings.alwaysDrawOnCharge ? 1 : Math.max(1, Math.floor(p.max * currentSettings.chargeThreshold));
           if (Math.floor(p.count) >= threshold) {
+            // Skip users that were already checked and found to lack premium colors/droplets
+            // Check this AFTER charge verification so users with charges aren't skipped
+            if (this._skipUsersForPremiumColors.has(userId)) continue;
+
             // Check if user can paint: has charges AND (has needed colors OR has droplets to buy them)
             let canPaint = true;
             if (this.autoBuyNeededColors && this.templatePremiumColors && this.templatePremiumColors.size > 0) {
@@ -3074,6 +3084,8 @@ class TemplateManager {
               // Skip user if they have neither the colors nor droplets to buy them
               if (!hasAnyNeededColor && !canBuyColor) {
                 canPaint = false;
+                // Add to skip cache - don't check this user again until someone buys a premium color
+                this._skipUsersForPremiumColors.add(userId);
                 try {
                   log(userId, rec.name, `[${this.name}] ⏭️ Skipping user: no needed premium colors and insufficient droplets (${userDroplets} drops, need ${2000 + reserve}).`);
                 } catch (_) {}
@@ -3148,7 +3160,55 @@ class TemplateManager {
               try {
                 log(id, name, `[${this.name}] ℹ️ Nothing painted. Skipping this turn and retrying soon.`);
               } catch (_) { }
-              await this._sleepInterruptible(5000);
+
+              // Try to buy missing premium colors if autoBuyNeededColors is enabled
+              if (this.autoBuyNeededColors && this.templatePremiumColors && this.templatePremiumColors.size > 0) {
+                const reserve = currentSettings.dropletReserve || 0;
+                const COLOR_COST = 2000;
+
+                // Check which premium colors this user is missing
+                const userBitmap = wplacer.userInfo?.extraColorsBitmap || "0";
+                const userDroplets = Number(wplacer.userInfo?.droplets || 0);
+                const missingColors = [];
+
+                for (const colorId of Array.from(this.templatePremiumColors)) {
+                  if (!this._hasPremium(userBitmap, colorId)) {
+                    missingColors.push(colorId);
+                  }
+                }
+
+                // Try to buy the missing colors if user has enough droplets
+                if (missingColors.length > 0 && (userDroplets - reserve) >= COLOR_COST) {
+                  let purchasedAny = false;
+                  for (const colorId of missingColors) {
+                    const currentDroplets = Number(wplacer.userInfo?.droplets || 0);
+                    if ((currentDroplets - reserve) < COLOR_COST) break;
+
+                    try {
+                      log(id, name, `[${this.name}] 💰 Attempting to buy missing premium color #${colorId}. Droplets: ${currentDroplets}, reserve: ${reserve}.`);
+                      await wplacer.buyProduct(100, 1, colorId);
+                      await sleep(currentSettings.purchaseCooldown || 5000);
+                      await wplacer.loadUserInfo().catch(() => {});
+                      log(id, name, `[${this.name}] 🛒 Bought premium color #${colorId}. Droplets ${currentDroplets} → ${wplacer.userInfo?.droplets}`);
+                      purchasedAny = true;
+                      // Clear skip cache - other users might now be able to paint with this color
+                      this._skipUsersForPremiumColors.clear();
+                    } catch (e) {
+                      logUserError(e, id, name, `purchase premium color #${colorId}`);
+                      break; // Stop trying if one purchase fails
+                    }
+                  }
+
+                  // If we bought any colors, retry immediately without sleeping
+                  if (!purchasedAny) {
+                    await this._sleepInterruptible(5000);
+                  }
+                } else {
+                  await this._sleepInterruptible(5000);
+                }
+              } else {
+                await this._sleepInterruptible(5000);
+              }
             }
             // cache any new seeds
             this.burstSeeds = wplacer._burstSeeds ? wplacer._burstSeeds.map((s) => ({ gx: s.gx, gy: s.gy })) : this.burstSeeds;

@@ -1,3 +1,32 @@
+## Changelog v4.3.12
+Fixed premium color painting logic and optimized user selection for large account pools.
+
+### Bug Fixes:
+- **Premium Color Auto-Purchase**: Bot now attempts to purchase missing premium colors when a user paints nothing
+  - Previously: Users with partial premium colors would be selected but paint nothing, causing infinite loop
+  - Now: When a user paints nothing due to missing colors, bot immediately tries to buy missing premium colors if user has enough droplets
+  - This prevents bot from getting stuck when only premium pixels remain but users have sufficient funds to purchase needed colors
+  - Only purchases if autoBuyNeededColors is enabled and user has enough droplets (accounting for reserve)
+
+### Performance Improvements:
+- **User Selection Optimization**: Dramatically improved performance when selecting users with 300+ accounts
+  - Previously: Bot checked all 335 accounts every iteration (~4 seconds with logs)
+  - Now: Bot caches users without premium colors/droplets and skips them in subsequent iterations
+  - Cache automatically clears when anyone purchases a premium color (allowing skipped users to try again)
+  - **Critical Fix**: Skip cache now checked AFTER charge verification (not before)
+    - Previously: Users in cache were skipped before checking charges, causing 3-4 minute delays
+    - Now: Users with charges are always checked, even if previously skipped for lack of colors/droplets
+  - Result: 10-20x fewer UserStatusCache lookups, no delays between accounts with charges
+  - Users are only checked once per charge cycle until someone buys a missing premium color
+
+### Technical Changes:
+- Added premium color purchase logic in `_performPaintTurn` when `paintedNow === 0`
+- Checks which template premium colors the user is missing and attempts to purchase them
+- Respects droplet reserve and purchase cooldown settings
+- Retries painting immediately after successful purchase (no sleep delay)
+- Added `_skipUsersForPremiumColors` Set to cache ineligible users
+- Cache clears on premium color purchase in both `_performPaintTurn` and `_tryAutoBuyNeededColors`
+
 ## Changelog v4.3.11
 Enhanced credential import with proxy support, color highlighting in preview, and community contribution templates.
 
