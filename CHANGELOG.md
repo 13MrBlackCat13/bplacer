@@ -1,3 +1,26 @@
+## Changelog v4.3.13
+Added configurable memory limit for large templates to prevent heap overflow crashes.
+
+### New Features:
+- **Max Mismatched Pixels Setting**: Configurable limit for template scanning to prevent out-of-memory crashes
+  - New setting `maxMismatchedPixels` (default: 500,000 pixels, minimum: 10,000)
+  - Accessible in UI under "Drawing & Strategy" settings card
+  - Prevents heap overflow when scanning massive templates with millions of mismatched pixels
+  - Bot now processes templates in batches instead of loading all pixels at once
+  - Setting persists across restarts in `data/settings.json`
+
+### Bug Fixes:
+- **Heap Overflow Prevention**: Fixed "JavaScript heap out of memory" crash when scanning templates with 3+ million mismatched pixels
+  - Previously: `_getMismatchedPixels()` loaded all pixels into memory at once, causing crash on large templates
+  - Now: Function returns early once configurable limit is reached, processing pixels in manageable batches
+  - Bot continues painting efficiently without loading entire mismatch set
+
+### Technical Changes:
+- Modified `WPlacer._getMismatchedPixels()` to respect `settings.maxMismatchedPixels` limit
+- Added validation in `/settings` PUT endpoint with minimum 10,000 pixel floor
+- Added UI input field with validation (min: 10000, default: 500000)
+- Added setting to default configuration object in server.js
+
 ## Changelog v4.3.12
 Fixed premium color painting logic and optimized user selection for large account pools.
 

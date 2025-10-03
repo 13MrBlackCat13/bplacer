@@ -1755,6 +1755,9 @@ class WPlacer {
   }
 
   _getMismatchedPixels() {
+    const MAX_PIXELS = Number.isFinite(this.settings?.maxMismatchedPixels)
+      ? Math.max(10000, Math.floor(this.settings.maxMismatchedPixels))
+      : 500000; // Limit to prevent heap overflow on massive templates
     const [startX, startY, startPx, startPy] = this.coords;
     const mismatched = [];
     for (let y = 0; y < this.template.height; y++) {
@@ -1789,6 +1792,7 @@ class WPlacer {
           // Treat missing tile data as mismatch to avoid premature finish
           if (this.hasColor(templateColor)) {
             mismatched.push({ tx: targetTx, ty: targetTy, px: localPx, py: localPy, color: templateColor, isEdge: isEdge });
+            if (mismatched.length >= MAX_PIXELS) return mismatched;
           }
           continue;
         }
@@ -1802,6 +1806,7 @@ class WPlacer {
 
         if (shouldPaint && this.hasColor(templateColor)) {
           mismatched.push({ tx: targetTx, ty: targetTy, px: localPx, py: localPy, color: templateColor, isEdge: isEdge });
+          if (mismatched.length >= MAX_PIXELS) return mismatched;
         }
       }
     }
@@ -2319,6 +2324,7 @@ let currentSettings = {
   alwaysDrawOnCharge: false,
   maxPixelsPerPass: 0,
   seedCount: 2,
+  maxMismatchedPixels: 500000,
   proxyEnabled: false,
   proxyRotationMode: "sequential",
   logProxyUsage: false,
@@ -6859,6 +6865,14 @@ app.put("/settings", (req, res) => {
     if (!Number.isFinite(m)) m = 0;
     m = Math.max(0, Math.floor(m));
     patch.maxPixelsPerPass = m;
+  }
+
+  // sanitize maxMismatchedPixels (minimum 10000 to prevent issues)
+  if (typeof patch.maxMismatchedPixels !== "undefined") {
+    let m = Number(patch.maxMismatchedPixels);
+    if (!Number.isFinite(m)) m = 500000;
+    m = Math.max(10000, Math.floor(m));
+    patch.maxMismatchedPixels = m;
   }
 
   const oldSettings = { ...currentSettings };

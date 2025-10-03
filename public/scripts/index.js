@@ -114,6 +114,7 @@ const totalMaxCharges = $("totalMaxCharges");
 const messageBoxOverlay = $("messageBoxOverlay");
 const alwaysDrawOnCharge = $("alwaysDrawOnCharge");
 const maxPixelsPerPass = $("maxPixelsPerPass");
+const maxMismatchedPixels = $("maxMismatchedPixels");
 const messageBoxTitle = $("messageBoxTitle");
 const messageBoxContent = $("messageBoxContent");
 const messageBoxConfirm = $("messageBoxConfirm");
@@ -4501,6 +4502,10 @@ openSettings.addEventListener("click", async () => {
             const mpp = Number(currentSettings.maxPixelsPerPass);
             maxPixelsPerPass.value = Number.isFinite(mpp) ? String(mpp) : '0';
         }
+        if (maxMismatchedPixels) {
+            const mmp = Number(currentSettings.maxMismatchedPixels);
+            maxMismatchedPixels.value = Number.isFinite(mmp) ? String(mmp) : '500000';
+        }
         seedCountHidden.value = currentSettings.seedCount ?? 2;
         window.BURST_SEED_COUNT = currentSettings.seedCount ?? 2;
 
@@ -4728,6 +4733,19 @@ maxPixelsPerPass?.addEventListener('change', async () => {
         maxPixelsPerPass.value = String(val);
         await axios.put('/settings', { maxPixelsPerPass: val });
         showMessage("Success", "Max pixels per pass saved!");
+    } catch (error) {
+        handleError(error);
+    }
+});
+
+
+maxMismatchedPixels?.addEventListener('change', async () => {
+    try {
+        const raw = parseInt(maxMismatchedPixels.value, 10);
+        const val = isNaN(raw) ? 500000 : Math.max(10000, raw | 0);
+        maxMismatchedPixels.value = String(val);
+        await axios.put('/settings', { maxMismatchedPixels: val });
+        showMessage("Success", "Max mismatched pixels saved!");
     } catch (error) {
         handleError(error);
     }
