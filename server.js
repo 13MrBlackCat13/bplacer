@@ -1778,10 +1778,20 @@ class WPlacer {
     return out;
   }
 
-  _getMismatchedPixels() {
-    const MAX_PIXELS = Number.isFinite(this.settings?.maxMismatchedPixels)
+  _getMismatchedPixels(drawingMethod = null) {
+    // Determine if this is a burst mode (requires lower limit due to O(n²) complexity)
+    const burstModes = new Set(["burst", "colors-burst-rare", "outline-then-burst", "burst-mixed"]);
+    const isBurstMode = drawingMethod ? burstModes.has(drawingMethod) : false;
+
+    // For burst modes use 20% of setting (max 100k), for linear modes use full setting
+    const configuredLimit = Number.isFinite(this.settings?.maxMismatchedPixels)
       ? Math.max(10000, Math.floor(this.settings.maxMismatchedPixels))
-      : 500000; // Limit to prevent heap overflow on massive templates
+      : 500000;
+
+    const MAX_PIXELS = isBurstMode
+      ? Math.min(Math.floor(configuredLimit * 0.2), 100000)
+      : configuredLimit;
+
     const [startX, startY, startPx, startPy] = this.coords;
     const mismatched = [];
     for (let y = 0; y < this.template.height; y++) {
@@ -1914,7 +1924,7 @@ class WPlacer {
       }
 
       // Sei - Moved this below "burst-mixed" check above; Makes more sense in console.
-      let mismatchedPixels = this._getMismatchedPixels();
+      let mismatchedPixels = this._getMismatchedPixels(activeMethod);
       if (mismatchedPixels.length === 0) return 0;
 
       log(this.userInfo.id, this.userInfo.name, `[${this.templateName}] Found ${mismatchedPixels.length} mismatched pixels.`);
@@ -2924,7 +2934,7 @@ class TemplateManager {
               if (burstFamily.has(currentSettings.drawingMethod)) {
                 const desired = Math.max(1, Math.min(Number(currentSettings?.seedCount ?? 2), 16));
                 if (!this.burstSeeds || this.burstSeeds.length !== desired) {
-                  const mm = checkWplacer._getMismatchedPixels();
+                  const mm = checkWplacer._getMismatchedPixels(currentSettings.drawingMethod);
                   if (Array.isArray(mm) && mm.length > 0) {
                     this.burstSeeds = checkWplacer._pickBurstSeeds(mm, desired);
                     saveTemplates();

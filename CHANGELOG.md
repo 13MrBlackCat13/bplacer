@@ -8,7 +8,7 @@ Added configurable memory limit for large templates to prevent heap overflow and
   - Prevents heap overflow when scanning massive templates with millions of mismatched pixels
   - Bot now processes templates in batches instead of loading all pixels at once
   - Setting persists across restarts in `data/settings.json`
-  - Automatically scales limits for burst modes (20% for BFS, 10% for seed calculation)
+  - **Smart Mode Detection**: Linear modes (top-to-bottom, radial) use full setting, burst modes auto-limited to 20% (max 100k)
 
 ### Bug Fixes:
 - **Heap Overflow Prevention**: Fixed "JavaScript heap out of memory" crash when scanning templates with 3+ million mismatched pixels
@@ -22,13 +22,15 @@ Added configurable memory limit for large templates to prevent heap overflow and
   - Prevents performance degradation and crashes on massive templates
 
 ### Technical Changes:
-- Modified `WPlacer._getMismatchedPixels()` to respect `settings.maxMismatchedPixels` limit
+- Modified `WPlacer._getMismatchedPixels()` to accept `drawingMethod` parameter and apply mode-specific limits
 - Added validation in `/settings` PUT endpoint with minimum 10,000 pixel floor
 - Added UI input field with validation (min: 10000, default: 500000)
 - Added setting to default configuration object in server.js
 - Added pixel count check in `_orderByBurst()` with automatic fallback to linear order
 - Added pixel sampling in `_pickBurstSeeds()` to prevent O(n²) performance issues
-- Burst mode limits automatically scale with maxMismatchedPixels setting
+- Linear modes (linear, radial, color-by-color) use full `maxMismatchedPixels` setting
+- Burst modes automatically limited to `min(maxMismatchedPixels * 0.2, 100000)` to prevent stack overflow
+- No performance impact on linear modes - only burst modes are restricted
 
 ## Changelog v4.3.12
 Fixed premium color painting logic and optimized user selection for large account pools.
