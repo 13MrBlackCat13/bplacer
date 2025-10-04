@@ -1,5 +1,5 @@
 ## Changelog v4.3.13
-Added configurable memory limit for large templates to prevent heap overflow crashes.
+Added configurable memory limit for large templates to prevent heap overflow and stack overflow crashes.
 
 ### New Features:
 - **Max Mismatched Pixels Setting**: Configurable limit for template scanning to prevent out-of-memory crashes
@@ -8,18 +8,27 @@ Added configurable memory limit for large templates to prevent heap overflow cra
   - Prevents heap overflow when scanning massive templates with millions of mismatched pixels
   - Bot now processes templates in batches instead of loading all pixels at once
   - Setting persists across restarts in `data/settings.json`
+  - Automatically scales limits for burst modes (20% for BFS, 10% for seed calculation)
 
 ### Bug Fixes:
 - **Heap Overflow Prevention**: Fixed "JavaScript heap out of memory" crash when scanning templates with 3+ million mismatched pixels
   - Previously: `_getMismatchedPixels()` loaded all pixels into memory at once, causing crash on large templates
   - Now: Function returns early once configurable limit is reached, processing pixels in manageable batches
   - Bot continues painting efficiently without loading entire mismatch set
+- **Stack Overflow Prevention**: Fixed "Maximum call stack size exceeded" crash in burst modes with 100k+ pixels
+  - Previously: `_orderByBurst()` processed all pixels with O(n²) complexity, causing stack overflow
+  - Now: Falls back to linear order when pixel count exceeds 20% of maxMismatchedPixels setting (max 100k)
+  - `_pickBurstSeeds()` now samples pixels when count exceeds 10% of maxMismatchedPixels setting (max 50k)
+  - Prevents performance degradation and crashes on massive templates
 
 ### Technical Changes:
 - Modified `WPlacer._getMismatchedPixels()` to respect `settings.maxMismatchedPixels` limit
 - Added validation in `/settings` PUT endpoint with minimum 10,000 pixel floor
 - Added UI input field with validation (min: 10000, default: 500000)
 - Added setting to default configuration object in server.js
+- Added pixel count check in `_orderByBurst()` with automatic fallback to linear order
+- Added pixel sampling in `_pickBurstSeeds()` to prevent O(n²) performance issues
+- Burst mode limits automatically scale with maxMismatchedPixels setting
 
 ## Changelog v4.3.12
 Fixed premium color painting logic and optimized user selection for large account pools.

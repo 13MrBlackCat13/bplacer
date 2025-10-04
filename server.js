@@ -1540,7 +1540,19 @@ class WPlacer {
 
   _pickBurstSeeds(pixels, k = 2, _ignoredTopFuzz = 5) {
     if (!pixels?.length) return [];
-    const pts = pixels.map((p) => this._globalXY(p));
+
+    // Sample large pixel sets to prevent performance issues
+    // Use 10% of maxMismatchedPixels setting for seed calculation
+    const configLimit = Number.isFinite(this.settings?.maxMismatchedPixels)
+      ? Math.floor(this.settings.maxMismatchedPixels * 0.1)
+      : 50000;
+    const MAX_SAMPLE = Math.min(configLimit, 50000);
+
+    const sampledPixels = pixels.length > MAX_SAMPLE
+      ? pixels.filter((_, i) => i % Math.ceil(pixels.length / MAX_SAMPLE) === 0)
+      : pixels;
+
+    const pts = sampledPixels.map((p) => this._globalXY(p));
 
     // Deterministic selection: pick lexicographically smallest point as first
     const firstIdx = (() => {
@@ -1593,6 +1605,18 @@ class WPlacer {
    */
   _orderByBurst(mismatchedPixels, seeds = 2) {
     if (mismatchedPixels.length <= 2) return mismatchedPixels;
+
+    // Prevent stack overflow on massive pixel sets - fallback to simple linear order
+    // Use 20% of maxMismatchedPixels setting (burst is more expensive than linear scan)
+    const configLimit = Number.isFinite(this.settings?.maxMismatchedPixels)
+      ? Math.floor(this.settings.maxMismatchedPixels * 0.2)
+      : 100000;
+    const MAX_BURST_PIXELS = Math.min(configLimit, 100000);
+
+    if (mismatchedPixels.length > MAX_BURST_PIXELS) {
+      console.warn(`⚠️ Too many pixels (${mismatchedPixels.length}) for burst mode, using linear order to prevent stack overflow`);
+      return mismatchedPixels; // Return linear order instead of complex BFS
+    }
 
     const [startX, startY] = this.coords;
     const byKey = new Map();
