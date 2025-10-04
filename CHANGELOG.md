@@ -9,6 +9,12 @@ Added configurable memory limit for large templates to prevent heap overflow and
   - Bot now processes templates in batches instead of loading all pixels at once
   - Setting persists across restarts in `data/settings.json`
   - **Smart Mode Detection**: Linear modes (top-to-bottom, radial) use full setting, burst modes auto-limited to 20% (max 100k)
+- **On-Demand Captcha Solver**: Captcha API now starts only when needed instead of on server startup
+  - Previously: Captcha solver API (api_server.py) started automatically with the bot
+  - Now: Starts only when `/user/register` endpoint is called for account registration
+  - Saves system resources when not registering new accounts
+  - Automatic startup with 2-second warmup period
+  - Graceful shutdown when bot stops
 
 ### Bug Fixes:
 - **Heap Overflow Prevention**: Fixed "JavaScript heap out of memory" crash when scanning templates with 3+ million mismatched pixels
@@ -31,6 +37,10 @@ Added configurable memory limit for large templates to prevent heap overflow and
 - Linear modes (linear, radial, color-by-color) use full `maxMismatchedPixels` setting
 - Burst modes automatically limited to `min(maxMismatchedPixels * 0.2, 100000)` to prevent stack overflow
 - No performance impact on linear modes - only burst modes are restricted
+- Removed auto-start of captcha solver on server startup
+- Added `ensureCaptchaApiRunning()` async function with startup state management
+- Added `captchaApiStarting` flag to prevent concurrent startup attempts
+- Captcha API check added to `/user/register` endpoint before registration attempt
 
 ## Changelog v4.3.12
 Fixed premium color painting logic and optimized user selection for large account pools.

@@ -516,8 +516,10 @@ cfClearanceManager.startPeriodicCleanup();
 // Очищаем устаревшие токены при запуске
 cfClearanceManager.cleanExpiredTokens();
 
-// Auto-start Turnstile Captcha Solver API
+// Turnstile Captcha Solver API (started on-demand during registration)
 let captchaApiProcess = null;
+let captchaApiStarting = false;
+
 function startCaptchaApi() {
   const captchaApiPath = path.join(process.cwd(), 'autoreg', 'api_server.py');
 
@@ -525,7 +527,7 @@ function startCaptchaApi() {
   if (!existsSync(captchaApiPath)) {
     console.log('⚠️ Captcha API server not found at:', captchaApiPath);
     console.log('   Auto-registration will not work without captcha solver');
-    return;
+    return false;
   }
 
   console.log('🚀 Starting Turnstile Captcha Solver API...');
@@ -553,17 +555,41 @@ function startCaptchaApi() {
   captchaApiProcess.on('close', (code) => {
     console.log(`⚠️ Captcha API process exited with code ${code}`);
     captchaApiProcess = null;
+    captchaApiStarting = false;
   });
 
   captchaApiProcess.on('error', (err) => {
     console.log(`❌ Failed to start Captcha API: ${err.message}`);
     console.log('   Make sure Python and required packages are installed (see autoreg/requirements.txt)');
     captchaApiProcess = null;
+    captchaApiStarting = false;
   });
+
+  return true;
 }
 
-// Start captcha API on server startup
-startCaptchaApi();
+async function ensureCaptchaApiRunning() {
+  // Already running
+  if (captchaApiProcess) return true;
+
+  // Already starting, wait a bit
+  if (captchaApiStarting) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    return captchaApiProcess !== null;
+  }
+
+  // Start it
+  captchaApiStarting = true;
+  const started = startCaptchaApi();
+
+  if (started) {
+    // Wait for API to be ready (2 seconds should be enough for Python startup)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  captchaApiStarting = false;
+  return captchaApiProcess !== null;
+}
 
 // Graceful shutdown handler for captcha API
 process.on('SIGINT', () => {
@@ -5479,6 +5505,12 @@ app.post("/user/register", async (req, res) => {
 
   try {
     console.log(`📝 [REGISTER API] Registration request for: ${username}`);
+
+    // Ensure captcha API is running before attempting registration
+    const captchaReady = await ensureCaptchaApiRunning();
+    if (!captchaReady) {
+      return res.status(503).json({ error: "Captcha solver API is not available" });
+    }
 
     const result = await registerAccount(username, password);
 
